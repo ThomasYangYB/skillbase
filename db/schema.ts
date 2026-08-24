@@ -203,3 +203,42 @@ export const requestRateLimits = sqliteTable("request_rate_limits", {
   primaryKey: primaryKey({ columns: [table.key, table.windowStart] }),
   windowIdx: index("idx_request_rate_limits_window").on(table.windowStart),
 }));
+
+export const skillWorkspaces = sqliteTable("skill_workspaces", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  ownerId: text("owner_id").notNull(),
+  ownerEmail: text("owner_email"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => ({
+  ownerIdx: index("idx_skill_workspaces_owner").on(table.ownerId, table.updatedAt),
+}));
+
+export const skillWorkspaceMembers = sqliteTable("skill_workspace_members", {
+  id: text("id").primaryKey(),
+  workspaceId: text("workspace_id").notNull(),
+  actorId: text("actor_id"),
+  actorEmail: text("actor_email"),
+  role: text("role").notNull().default("viewer"),
+  status: text("status").notNull().default("invited"),
+  inviteTokenHash: text("invite_token_hash"),
+  inviteExpiresAt: text("invite_expires_at"),
+  joinedAt: text("joined_at"),
+  createdAt: text("created_at").notNull(),
+}, (table) => ({
+  workspaceIdx: index("idx_skill_workspace_members_workspace").on(table.workspaceId, table.status, table.createdAt),
+  actorIdx: index("idx_skill_workspace_members_actor").on(table.actorId, table.status),
+}));
+
+export const skillWorkspaceItems = sqliteTable("skill_workspace_items", {
+  id: text("id").primaryKey(),
+  workspaceId: text("workspace_id").notNull(),
+  skillId: text("skill_id").notNull(),
+  note: text("note"),
+  addedBy: text("added_by").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => ({
+  workspaceIdx: index("idx_skill_workspace_items_workspace").on(table.workspaceId, table.updatedAt),
+}));

@@ -12,6 +12,7 @@ type SkillDetail = {
   sourceLinkStatus?: string; sourceLinkCheckedAt?: string | null; sourceLinkError?: string | null;
   licensePrevious?: string | null; licenseChangedAt?: string | null; updatedAt?: string;
 };
+type WorkspaceOption = { id: string; name: string; role: "owner" | "editor" | "viewer" };
 
 function verificationLabel(status?: string) {
   if (status === "sandbox_passed") return "격리 실행 검증 통과";
@@ -27,6 +28,8 @@ export default function SkillDetailClient({ skillId }: { skillId: string }) {
   const [input, setInput] = useState("");
   const [status, setStatus] = useState("");
   const [favorite, setFavorite] = useState(false);
+  const [workspaces, setWorkspaces] = useState<WorkspaceOption[]>([]);
+  const [workspaceId, setWorkspaceId] = useState("");
 
   useEffect(() => {
     fetch(`/api/skills/detail?id=${encodeURIComponent(skillId)}`, { cache: "no-store" }).then(async (response) => {
@@ -40,6 +43,11 @@ export default function SkillDetailClient({ skillId }: { skillId: string }) {
   useEffect(() => {
     if (!skill) return;
     fetch("/api/favorites", { cache: "no-store" }).then((response) => response.json()).then((payload: { ids?: string[] }) => setFavorite(payload.ids?.includes(skill.id) ?? false)).catch(() => undefined);
+    fetch("/api/workspaces", { cache: "no-store" }).then((response) => response.json()).then((payload: { workspaces?: WorkspaceOption[] }) => {
+      const next = Array.isArray(payload.workspaces) ? payload.workspaces : [];
+      setWorkspaces(next);
+      setWorkspaceId((current) => current || next[0]?.id || "");
+    }).catch(() => undefined);
   }, [skill]);
 
   if (!skill) return <main className="detail-shell"><header className="detail-topbar"><Link prefetch={false} className="brand" href="/" aria-label="skillbase 홈" onClick={(event) => { event.preventDefault(); window.location.assign("/"); }}><span className="brand-mark">s<span>·</span></span><span>skillbase</span></Link><Link className="detail-back" href="/">← 카탈로그</Link></header><div className="detail-loading" role="status">{status || "Skill 상세 정보를 불러오는 중입니다."}</div></main>;
@@ -63,6 +71,13 @@ export default function SkillDetailClient({ skillId }: { skillId: string }) {
     if (!response.ok) { setStatus(payload.error ?? "로그인이 필요합니다."); return; }
     setFavorite(next);
     setStatus(next ? "즐겨찾기에 저장했습니다." : "즐겨찾기에서 제거했습니다.");
+  };
+  const addToWorkspace = async () => {
+    if (!workspaceId) { setStatus("먼저 비공개 공간을 선택하세요."); return; }
+    const response = await fetch("/api/workspaces/items", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceId, skillId: skill.id }) });
+    const payload = await response.json() as { error?: string };
+    if (!response.ok) { setStatus(payload.error ?? "비공개 공간에 추가하지 못했습니다."); return; }
+    setStatus("비공개 공간에 Skill을 저장했습니다.");
   };
   const openApp = async () => {
     await prepare();
@@ -88,6 +103,7 @@ export default function SkillDetailClient({ skillId }: { skillId: string }) {
         <div className="detail-heading"><div className="detail-monogram">{skill.name.slice(0, 2).toUpperCase()}</div><div><p className="section-kicker">{skill.category}</p><h1>{skill.name}</h1><p>{skill.description}</p>{skill.summaryKo && <p className="detail-summary"><strong>한국어 요약</strong>{skill.summaryKo}</p>}</div><button className={`favorite-button ${favorite ? "active" : ""}`} onClick={() => void toggleFavorite()} aria-label="즐겨찾기">{favorite ? "★" : "☆"}</button></div>
         <div className="detail-badges"><span>{verificationLabel(skill.verificationStatus)}</span><span>권한 위험도 {skill.risk}</span><span>{skill.region} · {skill.sourceType}</span><span>라이선스 {skill.license ?? "미상"}</span></div>
         <div className="detail-source"><span>원본 출처</span><a href={skill.sourceUrl} target="_blank" rel="noreferrer">{skill.source} ↗</a></div>
+        {workspaces.length > 0 && <section className="detail-workspace"><div><strong>비공개 공간에 저장</strong><span>팀 멤버와 함께 이 Skill을 보관합니다.</span></div><select value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)} aria-label="비공개 공간 선택">{workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select><button onClick={() => void addToWorkspace()} disabled={workspaces.find((workspace) => workspace.id === workspaceId)?.role === "viewer"}>저장</button><Link href="/workspaces">공간 관리 ↗</Link></section>}
         <div className="detail-grid">
           <section className="detail-card"><div className="detail-card-title"><span>01</span><h2>설치와 호환성</h2></div><p>설치 전에 명령어와 필요한 플랫폼을 확인하세요. 실제 설치는 사용자의 로컬 환경에서 실행됩니다.</p><div className="detail-code"><code>{skill.install}</code><button onClick={() => { void navigator.clipboard?.writeText(skill.install); setStatus("설치 명령어를 복사했습니다."); }}>복사</button></div><div className="detail-chip-row">{skill.compatibility.map((item) => <span key={item}>{item}</span>)}</div></section>
           <section className="detail-card"><div className="detail-card-title"><span>02</span><h2>프롬프트 준비</h2></div><label htmlFor="detail-input">작업 입력값</label><textarea id="detail-input" value={input} onChange={(event) => setInput(event.target.value)} placeholder="이 Skill로 처리할 작업을 입력하세요." /><button className="detail-secondary" onClick={applyInput}>입력값 반영</button><label htmlFor="detail-prompt">실행 전 미리보기</label><textarea id="detail-prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} /><div className="detail-actions"><button className="detail-secondary" onClick={() => void prepare()}>프롬프트 복사</button><button className="detail-primary" onClick={() => void openApp()}>복사 후 앱 열기 ↗</button></div></section>

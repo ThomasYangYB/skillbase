@@ -28,6 +28,7 @@ jobs:
         run: |
           npm run lint
           npm test
+          npm run backup:restore-test < tests/fixtures/backup-minimal.json
       - name: Install adapter dependencies
         working-directory: sandbox-adapter
         run: npm ci

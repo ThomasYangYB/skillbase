@@ -197,7 +197,7 @@ test("keeps the operator approval queue and publication gate configured", async 
 });
 
 test("keeps durable abuse protection and restore rehearsal configured", async () => {
-  const [rateLimit, publicApi, feedback, submissions, backup, backupRoute, schema, migration, operator, docs] = await Promise.all([
+  const [rateLimit, publicApi, feedback, submissions, backup, backupRoute, schema, migration, operator, docs, restoreScript, packageJson, workspaceLib, workspaceRoute, workspacePage, workspaceMigration, detail, fixture, workflow] = await Promise.all([
     readFile(new URL("../lib/rate-limit.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/v1/skills/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/feedback/route.ts", import.meta.url), "utf8"),
@@ -208,6 +208,15 @@ test("keeps durable abuse protection and restore rehearsal configured", async ()
     readFile(new URL("../drizzle/0010_request_rate_limits.sql", import.meta.url), "utf8"),
     readFile(new URL("../lib/operator.ts", import.meta.url), "utf8"),
     readFile(new URL("../docs/operations.md", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/restore-rehearsal.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../lib/workspaces.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/workspaces/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/workspaces/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0011_private_workspaces.sql", import.meta.url), "utf8"),
+    readFile(new URL("../app/skills/[...id]/SkillDetailClient.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../tests/fixtures/backup-minimal.json", import.meta.url), "utf8"),
+    readFile(new URL("../.github/workflows/maintenance.yml", import.meta.url), "utf8"),
   ]);
   assert.match(rateLimit, /request_rate_limits/);
   assert.match(rateLimit, /x-ratelimit-remaining/);
@@ -221,4 +230,15 @@ test("keeps durable abuse protection and restore rehearsal configured", async ()
   assert.match(migration, /request_rate_limits/);
   assert.match(operator, /sec-fetch-site/);
   assert.match(docs, /staging D1/);
+  assert.match(restoreScript, /DatabaseSync/);
+  assert.match(restoreScript, /isolated-sqlite-restore/);
+  assert.match(packageJson, /backup:restore-test/);
+  assert.match(workspaceLib, /getWorkspaceAccess/);
+  assert.match(workspaceLib, /invite_token_hash/);
+  assert.match(workspaceRoute, /getRequestActor/);
+  assert.match(workspacePage, /비공개 공간/);
+  assert.match(workspaceMigration, /skill_workspace_items/);
+  assert.match(detail, /비공개 공간에 저장/);
+  assert.match(fixture, /workspaceItems/);
+  assert.match(workflow, /backup:restore-test/);
 });

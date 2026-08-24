@@ -471,6 +471,9 @@ async function ensureSchema(db: D1Database) {
     db.prepare("CREATE TABLE IF NOT EXISTS skill_favorites (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, actor_id TEXT NOT NULL, created_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS skill_submissions (id TEXT PRIMARY KEY, actor_id TEXT, actor_email TEXT, name TEXT NOT NULL, source_url TEXT NOT NULL, source_type TEXT NOT NULL, category TEXT NOT NULL, description TEXT NOT NULL, install TEXT NOT NULL, prompt TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', reviewer_id TEXT, review_note TEXT, created_at TEXT NOT NULL, reviewed_at TEXT)"),
     db.prepare("CREATE TABLE IF NOT EXISTS request_rate_limits (key TEXT NOT NULL, window_start INTEGER NOT NULL, count INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, PRIMARY KEY (key, window_start))"),
+    db.prepare("CREATE TABLE IF NOT EXISTS skill_workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_id TEXT NOT NULL, owner_email TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS skill_workspace_members (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, actor_id TEXT, actor_email TEXT, role TEXT NOT NULL DEFAULT 'viewer', status TEXT NOT NULL DEFAULT 'invited', invite_token_hash TEXT, invite_expires_at TEXT, joined_at TEXT, created_at TEXT NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS skill_workspace_items (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, skill_id TEXT NOT NULL, note TEXT, added_by TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS skill_review_events (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, action TEXT NOT NULL, from_status TEXT, to_status TEXT NOT NULL, actor_id TEXT NOT NULL, actor_email TEXT, note TEXT, created_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS skill_verification_jobs (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, mode TEXT NOT NULL, status TEXT NOT NULL, requested_by TEXT NOT NULL, requested_email TEXT, source_hash TEXT NOT NULL, verifier_version TEXT NOT NULL, summary TEXT, findings_json TEXT NOT NULL DEFAULT '[]', verification_method TEXT, duration_ms INTEGER, external_job_id TEXT, created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skills_status_category ON skills(status, category)"),
@@ -490,6 +493,12 @@ async function ensureSchema(db: D1Database) {
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_submissions_status_created ON skill_submissions(status, created_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_submissions_actor_created ON skill_submissions(actor_id, created_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_request_rate_limits_window ON request_rate_limits(window_start)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_workspaces_owner ON skill_workspaces(owner_id, updated_at)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_workspace_members_workspace ON skill_workspace_members(workspace_id, status, created_at)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_workspace_members_actor ON skill_workspace_members(actor_id, status)"),
+    db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_skill_workspace_members_unique_actor ON skill_workspace_members(workspace_id, actor_id) WHERE actor_id IS NOT NULL"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_workspace_items_workspace ON skill_workspace_items(workspace_id, updated_at)"),
+    db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_skill_workspace_items_unique_skill ON skill_workspace_items(workspace_id, skill_id)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_verification_jobs_skill_status ON skill_verification_jobs(skill_id, status, created_at)"),
   ]);
 
