@@ -84,6 +84,78 @@ a { color: inherit; text-decoration: none; }
 .region-kr { background: #eef8df; color: #71923a; }
 .region-global { background: #f0eeff; color: #756bd0; }
 .skill-meta a { max-width: 170px; overflow: hidden; color: #888a94; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Mobile layout guardrails: keep flex/grid children from forcing a wider page. */
+@media (max-width: 768px) {
+  html, body { max-width: 100%; overflow-x: hidden; }
+  .topbar, .detail-topbar { gap: 12px; padding-left: 16px; padding-right: 16px; }
+  .brand { min-width: 0; flex-shrink: 0; }
+  .hero { max-width: none; padding: 44px 16px 32px; }
+  .hero h1 { max-width: 100%; font-size: clamp(38px, 11vw, 48px); letter-spacing: -2.5px; overflow-wrap: anywhere; }
+  .hero-description { overflow-wrap: anywhere; }
+  .hero-search { width: 100%; }
+  .hero-art { min-height: 245px; overflow: hidden; transform: scale(.72); transform-origin: left top; }
+  .trust-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 16px; }
+  .trust-strip > div { min-width: 0; }
+  .trust-note { grid-column: 1 / -1; }
+  .explore-layout { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 38px 16px 52px; }
+  .category-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .catalog-heading { align-items: flex-start; gap: 14px; }
+  .catalog-heading h2 { font-size: 22px; }
+  .catalog-controls { min-width: 0; flex-direction: column; align-items: stretch; gap: 8px; }
+  .sort-select { width: 100%; }
+  .skill-grid { grid-template-columns: minmax(0, 1fr); }
+  .skill-card, .skill-card-top, .skill-card-title, .title-line { min-width: 0; }
+  .skill-card-title { flex: 1; }
+  .skill-card h3, .skill-card-title p, .skill-description { overflow-wrap: anywhere; word-break: break-word; }
+  .skill-description { max-width: 100%; }
+  .compatibility-row { align-items: flex-start; flex-wrap: wrap; }
+  .platform-chip { overflow-wrap: anywhere; }
+  .card-footer { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .card-actions { width: 100%; flex-wrap: wrap; justify-content: space-between; }
+  .submit-banner { margin: 0 16px 48px; padding: 20px; }
+  .submit-banner > div { align-items: flex-start; min-width: 0; }
+  .submit-banner h2 { overflow-wrap: anywhere; }
+  .personal-hub, .recommendation-section { margin-left: 16px; margin-right: 16px; }
+  .personal-hub { padding: 20px; }
+  .recommendation-card, .recommendation-card > div:last-of-type { min-width: 0; }
+  .recommendation-card p { overflow-wrap: anywhere; }
+  .modal-backdrop { align-items: flex-end; padding: 12px; }
+  .skill-modal { width: 100%; max-height: calc(100dvh - 24px); padding: 24px 16px; border-radius: 20px 20px 0 0; }
+  .modal-heading, .modal-heading > div:last-child, .modal-columns, .modal-block { min-width: 0; }
+  .modal-heading h2, .modal-heading p:last-child, .modal-block > p { overflow-wrap: anywhere; }
+  .code-box, .code-box code, .prompt-box textarea { min-width: 0; max-width: 100%; }
+  .code-box code { text-overflow: ellipsis; white-space: nowrap; }
+  .prompt-box textarea { display: block; }
+  .prompt-actions { flex-direction: column; }
+  .detail-page { width: 100%; padding: 32px 16px 60px; }
+  .detail-heading { align-items: flex-start; gap: 12px; min-width: 0; }
+  .detail-heading > div:nth-child(2) { min-width: 0; flex: 1; }
+  .detail-heading h1 { font-size: clamp(28px, 9vw, 42px); letter-spacing: -1.5px; overflow-wrap: anywhere; }
+  .detail-heading p, .detail-summary { max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
+  .detail-source { flex-wrap: wrap; }
+  .detail-source a { min-width: 0; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
+  .detail-grid, .detail-card, .detail-card-title, .detail-code { min-width: 0; }
+  .detail-card { padding: 16px; }
+  .detail-card-title h2 { overflow-wrap: anywhere; }
+  .detail-code { max-width: 100%; }
+  .detail-code code { min-width: 0; text-overflow: ellipsis; white-space: nowrap; }
+  .detail-card textarea { display: block; min-width: 0; max-width: 100%; }
+  .detail-actions { flex-direction: column; }
+  .verification-panel { min-width: 0; padding: 16px; }
+  .verification-panel > div { align-items: flex-start; flex-wrap: wrap; }
+  .detail-footer-links a { overflow-wrap: anywhere; word-break: break-word; }
+}
+
+@media (max-width: 380px) {
+  .brand { gap: 6px; font-size: 17px; }
+  .brand-mark { width: 25px; height: 25px; font-size: 17px; }
+  .hero h1 { font-size: 36px; }
+  .catalog-heading { flex-direction: column; }
+  .catalog-controls { width: 100%; align-items: stretch; }
+  .detail-topbar { padding-left: 12px; padding-right: 12px; }
+  .detail-back { font-size: 9px; }
+}
 .modal-source { margin: 13px 0 0; color: #a3a4ad; font-size: 10px; }
 .modal-source a { color: #746bd0; font-weight: 800; }
 .sync-state { display: inline-block; margin: 0 0 10px; color: #6f64ca; font-size: 10px; font-weight: 800; }

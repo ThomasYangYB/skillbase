@@ -93,6 +93,15 @@ test("queues AI Korean summaries for new and changed Skills", async () => {
   assert.match(vite, /ai: \{ binding: "AI" \}/);
 });
 
+test("protects mobile layouts from horizontal overflow", async () => {
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(css, /@media \(max-width: 768px\)/);
+  assert.match(css, /\.explore-layout \{ grid-template-columns: minmax\(0, 1fr\)/);
+  assert.match(css, /\.skill-card, \.skill-card-top, \.skill-card-title, \.title-line \{ min-width: 0; \}/);
+  assert.match(css, /\.detail-code code \{ min-width: 0; text-overflow: ellipsis/);
+  assert.match(css, /\.prompt-actions \{ flex-direction: column; \}/);
+});
+
 test("keeps the operator approval queue and publication gate configured", async () => {
   const [schema, sync, route, operator, adminPage, migration, verification, callback, verificationRoute, verificationMigration, metricsRoute, exportRoute, observabilityMigration, alertsRoute, backupRoute, qualityRoute, usageRoute, favoritesRoute, feedbackRoute, qualityLib, usageLib, maintenanceWorkflow, dependabot, operationalMigration] = await Promise.all([
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
