@@ -100,7 +100,11 @@ export default function AdminQueuePage() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void loadQueue(tab); }, 0);
-    return () => window.clearTimeout(timer);
+    const poller = window.setInterval(() => { void loadQueue(tab); }, 10000);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(poller);
+    };
   }, [loadQueue, tab]);
 
   const changeStatus = async (skillId: string, action: ReviewAction) => {

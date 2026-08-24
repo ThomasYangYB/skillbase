@@ -1,5 +1,5 @@
 import { getOperator, operatorErrorResponse } from "../../../../lib/operator";
-import { listVerificationJobs, requestSandboxVerification, runStaticVerification } from "../../../../lib/verification";
+import { listVerificationJobs, refreshSandboxVerificationJobs, requestSandboxVerification, runStaticVerification } from "../../../../lib/verification";
 import { runtimeEnv } from "../../../../lib/runtime-env";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +10,7 @@ export async function GET(request: Request) {
   const skillId = new URL(request.url).searchParams.get("skillId")?.trim();
   if (!skillId) return Response.json({ error: "skillId가 필요합니다." }, { status: 400 });
   try {
+    await refreshSandboxVerificationJobs(runtimeEnv, skillId);
     return Response.json({ jobs: await listVerificationJobs(runtimeEnv.DB, skillId) }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "검증 이력을 불러오지 못했습니다." }, { status: 404 });

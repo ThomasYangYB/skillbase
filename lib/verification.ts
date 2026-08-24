@@ -17,6 +17,15 @@ export type VerificationEnv = {
   SKILLBASE_SANDBOX_TOKEN?: string;
 };
 
+type SandboxResultPayload = {
+  status?: "queued" | "passed" | "failed";
+  sourceHash?: string;
+  verificationMethod?: SandboxVerificationMethod;
+  summary?: string;
+  findings?: unknown[];
+  completedAt?: string;
+};
+
 const VERIFIER_VERSION = "static-1";
 
 function now() {
@@ -107,6 +116,49 @@ async function fetchDocument(sourceUrl: string, env: VerificationEnv) {
 function envDatabase(env: VerificationEnv) {
   if (!env.DB) throw new Error("D1 binding DB is unavailable");
   return env.DB;
+}
+
+function sandboxResultUrl(adapterUrl: string, jobId: string) {
+  const url = new URL(adapterUrl);
+  url.pathname = url.pathname.replace(/\/verify$/, "/result");
+  url.search = new URLSearchParams({ jobId }).toString();
+  return url;
+}
+
+async function applySandboxResult(env: VerificationEnv, row: { id: string; skill_id: string; source_hash: string }, payload: SandboxResultPayload) {
+  if (!env.DB || !payload.status || payload.status === "queued" || payload.sourceHash !== row.source_hash) return false;
+  const finishedAt = payload.completedAt ?? now();
+  const summary = payload.summary?.trim() || (payload.status === "passed" ? "격리 환경 설치 검증을 통과했습니다." : "격리 환경 설치 검증에 실패했습니다.");
+  const findings = Array.isArray(payload.findings) ? payload.findings : [];
+  const verificationStatus: VerificationStatus = payload.status === "passed"
+    ? payload.verificationMethod === "integrity_fallback" ? "sandbox_fallback_passed" : "sandbox_passed"
+    : "sandbox_failed";
+  await env.DB.batch([
+    env.DB.prepare("UPDATE skill_verification_jobs SET status = ?, summary = ?, findings_json = ?, finished_at = ? WHERE id = ? AND source_hash = ?").bind(payload.status, summary, JSON.stringify(findings), finishedAt, row.id, row.source_hash),
+    env.DB.prepare("UPDATE skills SET verification_status = ?, verification_updated_at = ?, verification_summary = ? WHERE id = ? AND content_hash = ?").bind(verificationStatus, finishedAt, summary, row.skill_id, row.source_hash),
+  ]);
+  return true;
+}
+
+export async function refreshSandboxVerificationJobs(env: VerificationEnv, skillId?: string) {
+  if (!env.DB || !env.SKILLBASE_SANDBOX_URL || !env.SKILLBASE_SANDBOX_TOKEN) return 0;
+  const rows = skillId
+    ? await env.DB.prepare("SELECT id, skill_id, source_hash FROM skill_verification_jobs WHERE mode = 'sandbox' AND status = 'queued' AND skill_id = ? ORDER BY created_at ASC LIMIT 20").bind(skillId).all<{ id: string; skill_id: string; source_hash: string }>()
+    : await env.DB.prepare("SELECT id, skill_id, source_hash FROM skill_verification_jobs WHERE mode = 'sandbox' AND status = 'queued' ORDER BY created_at ASC LIMIT 50").all<{ id: string; skill_id: string; source_hash: string }>();
+  let updated = 0;
+  for (const row of rows.results ?? []) {
+    try {
+      const response = await fetch(sandboxResultUrl(env.SKILLBASE_SANDBOX_URL, row.id), {
+        headers: { authorization: `Bearer ${env.SKILLBASE_SANDBOX_TOKEN}`, "user-agent": "skillbase-verification-poller/1.0" },
+      });
+      if (!response.ok) continue;
+      const payload = await response.json() as SandboxResultPayload;
+      if (await applySandboxResult(env, row, payload)) updated += 1;
+    } catch {
+      // The queue remains authoritative while the adapter is temporarily unavailable.
+    }
+  }
+  return updated;
 }
 
 export async function runStaticVerification(env: VerificationEnv, skillId: string, actor: { id: string; email?: string | null }) {

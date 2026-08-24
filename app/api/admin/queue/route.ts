@@ -1,5 +1,6 @@
 import { changeSkillApproval, listReviewQueue, type ReviewAction } from "../../../../lib/sync";
 import { getOperator, operatorErrorResponse } from "../../../../lib/operator";
+import { refreshSandboxVerificationJobs } from "../../../../lib/verification";
 import { runtimeEnv } from "../../../../lib/runtime-env";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +11,7 @@ export async function GET(request: Request) {
   if (!operator) return operatorErrorResponse();
   const url = new URL(request.url);
   const status = url.searchParams.get("status") ?? "review";
+  await refreshSandboxVerificationJobs(runtimeEnv);
   const result = await listReviewQueue(runtimeEnv.DB, status, Number(url.searchParams.get("limit") ?? 100));
   return Response.json(result, { headers: { "cache-control": "no-store" } });
 }

@@ -15,16 +15,24 @@
   ],
   "durable_objects": {
     "bindings": [
-      {
-        "class_name": "Sandbox",
-        "name": "Sandbox"
-      }
-    ]
+        {
+          "class_name": "Sandbox",
+          "name": "Sandbox"
+        },
+        {
+          "class_name": "VerificationResultStore",
+          "name": "RESULTS"
+        }
+      ]
   },
   "migrations": [
     {
       "new_sqlite_classes": ["Sandbox"],
       "tag": "v1"
+    },
+    {
+      "new_sqlite_classes": ["VerificationResultStore"],
+      "tag": "v2"
     }
   ],
   "queues": {

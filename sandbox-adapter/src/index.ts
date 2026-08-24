@@ -1,14 +1,26 @@
 import { ContainerProxy, getSandbox, Sandbox as CloudflareSandbox } from "@cloudflare/sandbox";
+import { DurableObject } from "cloudflare:workers";
 import { buildInstallCommand, parseInstallCommand, parseVerifyRequest, rawSourceUrl, safeSandboxId, SKILLS_CLI_VERSION, sourceRepository, trimOutput, type VerifyRequest } from "./policy";
 
 export { ContainerProxy };
 
 type Env = {
   Sandbox: DurableObjectNamespace<Sandbox>;
+  RESULTS: DurableObjectNamespace<VerificationResultStore>;
   SANDBOX_ADAPTER_TOKEN?: string;
   SKILLBASE_CALLBACK_TOKEN?: string;
   SKILLBASE_CALLBACK_URL: string;
   VERIFICATION_QUEUE: Queue<VerifyRequest>;
+};
+
+type StoredVerificationResult = {
+  jobId: string;
+  sourceHash: string;
+  status: "passed" | "failed";
+  verificationMethod?: "official_cli" | "integrity_fallback";
+  summary: string;
+  findings: unknown[];
+  completedAt: string;
 };
 
 export class Sandbox extends CloudflareSandbox {
@@ -32,6 +44,21 @@ export class Sandbox extends CloudflareSandbox {
   ];
 }
 
+export class VerificationResultStore extends DurableObject {
+  async fetch(request: Request) {
+    if (request.method === "PUT") {
+      const result = await request.json() as StoredVerificationResult;
+      await this.ctx.storage.put("result", result);
+      return Response.json({ ok: true });
+    }
+    if (request.method === "GET") {
+      const result = await this.ctx.storage.get<StoredVerificationResult>("result");
+      return result ? Response.json(result) : Response.json({ status: "queued" });
+    }
+    return Response.json({ error: "Method not allowed" }, { status: 405 });
+  }
+}
+
 function unauthorized() {
   return Response.json({ error: "Sandbox 어댑터 인증이 필요합니다." }, { status: 401 });
 }
@@ -53,6 +80,23 @@ async function notifyCatalog(request: VerifyRequest, env: Env, status: "passed" 
   console.log(JSON.stringify({ event: "verification-callback", jobId: safeSandboxId(request.jobId), status: response.status }));
   if (!response.ok) throw new Error(`카탈로그 callback이 ${response.status}로 실패했습니다.`);
   return response;
+}
+
+async function storeResult(request: VerifyRequest, env: Env, result: Omit<StoredVerificationResult, "jobId" | "sourceHash" | "completedAt">) {
+  const id = env.RESULTS.idFromName(safeSandboxId(request.jobId));
+  const response = await env.RESULTS.get(id).fetch("https://skillbase-result/store", {
+    method: "PUT",
+    body: JSON.stringify({ ...result, jobId: request.jobId, sourceHash: request.sourceHash, completedAt: new Date().toISOString() }),
+  });
+  if (!response.ok) throw new Error(`검증 결과 저장이 ${response.status}로 실패했습니다.`);
+}
+
+async function notifyCatalogBestEffort(request: VerifyRequest, env: Env, status: "passed" | "failed", verificationMethod: "official_cli" | "integrity_fallback" | undefined, summary: string, findings: unknown[]) {
+  try {
+    await notifyCatalog(request, env, status, verificationMethod, summary, findings);
+  } catch (error) {
+    console.log(JSON.stringify({ event: "verification-callback-skipped", jobId: safeSandboxId(request.jobId), reason: error instanceof Error ? error.message : "callback failed" }));
+  }
 }
 
 async function verify(request: VerifyRequest, env: Env) {
@@ -116,21 +160,31 @@ async function processVerification(request: VerifyRequest, env: Env) {
     result = await verify(request, env);
   } catch (error) {
     const summary = error instanceof Error ? error.message : "격리 설치 검증에 실패했습니다.";
-    await notifyCatalog(request, env, "failed", undefined, summary, [{ code: "sandbox-error", severity: "blocker", title: "격리 검증 실행 오류", detail: summary }]);
+    const findings = [{ code: "sandbox-error", severity: "blocker", title: "격리 검증 실행 오류", detail: summary }];
+    await storeResult(request, env, { status: "failed", summary, findings });
+    await notifyCatalogBestEffort(request, env, "failed", undefined, summary, findings);
     return;
   }
   console.log(JSON.stringify({ event: "verification-result", jobId: safeSandboxId(request.jobId), success: result.success, method: result.verificationMethod }));
-  await notifyCatalog(request, env, result.success ? "passed" : "failed", result.success ? result.verificationMethod : undefined, result.summary, result.findings);
+  await storeResult(request, env, { status: result.success ? "passed" : "failed", verificationMethod: result.success ? result.verificationMethod : undefined, summary: result.summary, findings: result.findings });
+  await notifyCatalogBestEffort(request, env, result.success ? "passed" : "failed", result.success ? result.verificationMethod : undefined, result.summary, result.findings);
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/health" && request.method === "GET") return Response.json({ ok: true, service: "skillbase-sandbox-adapter", asyncVerification: true, skillsCliVersion: SKILLS_CLI_VERSION });
-    if (url.pathname !== "/verify" || request.method !== "POST") return Response.json({ error: "Not found" }, { status: 404 });
+    if (url.pathname !== "/verify" && url.pathname !== "/result") return Response.json({ error: "Not found" }, { status: 404 });
     if (!env.SANDBOX_ADAPTER_TOKEN) return Response.json({ error: "Sandbox adapter secret이 설정되지 않았습니다." }, { status: 503 });
     if (!env.VERIFICATION_QUEUE) return Response.json({ error: "검증 Queue가 설정되지 않았습니다." }, { status: 503 });
     if (request.headers.get("authorization") !== `Bearer ${env.SANDBOX_ADAPTER_TOKEN}`) return unauthorized();
+    if (url.pathname === "/result" && request.method === "GET") {
+      const jobId = url.searchParams.get("jobId") ?? "";
+      if (!/^[A-Za-z0-9:_./-]{1,240}$/.test(jobId)) return Response.json({ error: "jobId가 필요합니다." }, { status: 400 });
+      const id = env.RESULTS.idFromName(safeSandboxId(jobId));
+      return env.RESULTS.get(id).fetch("https://skillbase-result/result");
+    }
+    if (url.pathname !== "/verify" || request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
     try {
       const raw = await request.text();
       if (raw.length > 32000) return Response.json({ error: "요청 본문이 너무 큽니다." }, { status: 413 });
