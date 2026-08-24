@@ -45,6 +45,8 @@ test("keeps the adapter fail-closed and network policy visible in source", async
   assert.match(source, /asyncVerification: true/);
   assert.match(source, /SANDBOX_ADAPTER_TOKEN/);
   assert.match(source, /sandbox\.destroy\(\)/);
+  assert.match(source, /durationMs/);
+  assert.match(source, /Math\.min\(request\.constraints\.timeoutMs, 90000\)/);
   assert.match(policySource, /SKILLS_CLI_VERSION = "1\.5\.23"/);
   assert.match(policySource, /--offline/);
   assert.match(policySource, /node_modules\/\.bin\/skills/);

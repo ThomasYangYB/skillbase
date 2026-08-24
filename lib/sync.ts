@@ -446,13 +446,24 @@ async function ensureSchema(db: D1Database) {
     db.prepare("CREATE TABLE IF NOT EXISTS sync_sources (id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, url TEXT NOT NULL, region TEXT NOT NULL, source_type TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, last_synced_at TEXT, last_error TEXT)"),
     db.prepare("CREATE TABLE IF NOT EXISTS sync_runs (id TEXT PRIMARY KEY, started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL, sources_scanned INTEGER NOT NULL DEFAULT 0, candidates_seen INTEGER NOT NULL DEFAULT 0, accepted INTEGER NOT NULL DEFAULT 0, rejected INTEGER NOT NULL DEFAULT 0, error_summary TEXT)"),
     db.prepare("CREATE TABLE IF NOT EXISTS skill_review_events (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, action TEXT NOT NULL, from_status TEXT, to_status TEXT NOT NULL, actor_id TEXT NOT NULL, actor_email TEXT, note TEXT, created_at TEXT NOT NULL)"),
-    db.prepare("CREATE TABLE IF NOT EXISTS skill_verification_jobs (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, mode TEXT NOT NULL, status TEXT NOT NULL, requested_by TEXT NOT NULL, requested_email TEXT, source_hash TEXT NOT NULL, verifier_version TEXT NOT NULL, summary TEXT, findings_json TEXT NOT NULL DEFAULT '[]', external_job_id TEXT, created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS skill_verification_jobs (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, mode TEXT NOT NULL, status TEXT NOT NULL, requested_by TEXT NOT NULL, requested_email TEXT, source_hash TEXT NOT NULL, verifier_version TEXT NOT NULL, summary TEXT, findings_json TEXT NOT NULL DEFAULT '[]', verification_method TEXT, duration_ms INTEGER, external_job_id TEXT, created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skills_status_category ON skills(status, category)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skills_region ON skills(region)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skills_last_seen ON skills(last_seen_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_review_events_skill ON skill_review_events(skill_id, created_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_verification_jobs_skill_status ON skill_verification_jobs(skill_id, status, created_at)"),
   ]);
+
+  const verificationJobInfo = await db.prepare("PRAGMA table_info(skill_verification_jobs)").all<{ name: string }>();
+  const verificationJobColumns = new Set((verificationJobInfo.results ?? []).map((column) => column.name));
+  for (const [name, definition] of [["verification_method", "TEXT"], ["duration_ms", "INTEGER"]] as const) {
+    if (verificationJobColumns.has(name)) continue;
+    try {
+      await db.prepare(`ALTER TABLE skill_verification_jobs ADD COLUMN ${name} ${definition}`).run();
+    } catch (error) {
+      if (!String(error).toLowerCase().includes("duplicate column")) throw error;
+    }
+  }
 
   const tableInfo = await db.prepare("PRAGMA table_info(skills)").all<{ name: string }>();
   const columns = new Set((tableInfo.results ?? []).map((column) => column.name));
@@ -476,6 +487,7 @@ async function ensureSchema(db: D1Database) {
   await db.batch([
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skills_approval_status ON skills(approval_status, updated_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skills_verification_status ON skills(verification_status, updated_at)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_verification_jobs_method ON skill_verification_jobs(verification_method, created_at)"),
   ]);
 }
 
@@ -520,6 +532,8 @@ export async function syncAllSources(env: SyncEnv) {
   if (!env.DB) throw new Error("D1 binding DB is unavailable");
   const db = env.DB;
   await ensureSchema(db);
+  const activeRun = await db.prepare("SELECT id FROM sync_runs WHERE status = 'running' AND julianday(started_at) > julianday('now', '-45 minutes') ORDER BY started_at DESC LIMIT 1").first<{ id: string }>();
+  if (activeRun) return { runId: activeRun.id, status: "already_running", sourcesScanned: 0, candidatesSeen: 0, accepted: 0, rejected: 0, errors: ["이미 실행 중인 수집 작업이 있습니다."] };
   await writeSources(db);
   const runId = crypto.randomUUID();
   const startedAt = now();
@@ -587,7 +601,7 @@ function isVerificationStatus(value: unknown): value is VerificationStatus {
   return value === "unverified" || value === "legacy" || value === "static_passed" || value === "static_warning" || value === "static_blocked" || value === "sandbox_passed" || value === "sandbox_fallback_passed" || value === "sandbox_failed" || value === "sandbox_unavailable";
 }
 
-export async function listStoredSkills(db: D1Database, search = "", region = "", category = "", limit = 120) {
+export async function listStoredSkills(db: D1Database, search = "", region = "", category = "", verification = "", sort = "recommended", limit = 120) {
   await ensureSchema(db);
   const clauses = ["status = 'active'", "approval_status = 'published'"];
   const args: (string | number)[] = [];
@@ -604,7 +618,12 @@ export async function listStoredSkills(db: D1Database, search = "", region = "",
     clauses.push("category = ?");
     args.push(category);
   }
-  const statement = db.prepare(`SELECT * FROM skills WHERE ${clauses.join(" AND ")} ORDER BY updated_at DESC, name ASC LIMIT ?`).bind(...args, Math.min(Math.max(limit, 1), 200));
+  if (["sandbox_passed", "sandbox_fallback_passed", "static_passed", "unverified", "static_warning", "static_blocked", "sandbox_failed", "sandbox_unavailable"].includes(verification)) {
+    clauses.push("verification_status = ?");
+    args.push(verification);
+  }
+  const order = sort === "name" ? "name ASC" : sort === "verified" ? "CASE WHEN verification_status = 'sandbox_passed' THEN 0 WHEN verification_status = 'static_passed' THEN 1 WHEN verification_status = 'sandbox_fallback_passed' THEN 2 ELSE 3 END, updated_at DESC" : "updated_at DESC, name ASC";
+  const statement = db.prepare(`SELECT * FROM skills WHERE ${clauses.join(" AND ")} ORDER BY ${order} LIMIT ?`).bind(...args, Math.min(Math.max(limit, 1), 200));
   const result = await statement.all<Record<string, unknown>>();
   return result.results.map(rowToSkill);
 }

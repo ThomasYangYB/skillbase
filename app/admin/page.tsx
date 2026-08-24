@@ -30,6 +30,18 @@ type QueueItem = {
 };
 
 type Counts = Record<ApprovalStatus, number>;
+type VerificationMetrics = {
+  windowDays: number;
+  total: number;
+  passed: number;
+  failed: number;
+  queued: number;
+  officialCli: number;
+  fallback: number;
+  static: number;
+  averageDurationMs: number | null;
+  fallbackRate: number;
+};
 
 const tabs: Array<{ key: QueueTab; label: string }> = [
   { key: "review", label: "검토 필요" },
@@ -81,6 +93,7 @@ export default function AdminQueuePage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [metrics, setMetrics] = useState<VerificationMetrics | null>(null);
 
   const loadQueue = useCallback(async (nextTab: QueueTab) => {
     setLoading(true);
@@ -98,14 +111,24 @@ export default function AdminQueuePage() {
     }
   }, []);
 
+  const loadMetrics = useCallback(async () => {
+    try {
+      const response = await fetch("/api/admin/metrics?days=30", { cache: "no-store" });
+      const payload = await response.json() as { verification?: VerificationMetrics };
+      if (response.ok && payload.verification) setMetrics(payload.verification);
+    } catch {
+      // Metrics are informative and should not block queue operations.
+    }
+  }, []);
+
   useEffect(() => {
-    const timer = window.setTimeout(() => { void loadQueue(tab); }, 0);
-    const poller = window.setInterval(() => { void loadQueue(tab); }, 10000);
+    const timer = window.setTimeout(() => { void loadQueue(tab); void loadMetrics(); }, 0);
+    const poller = window.setInterval(() => { void loadQueue(tab); void loadMetrics(); }, 10000);
     return () => {
       window.clearTimeout(timer);
       window.clearInterval(poller);
     };
-  }, [loadQueue, tab]);
+  }, [loadMetrics, loadQueue, tab]);
 
   const changeStatus = async (skillId: string, action: ReviewAction) => {
     setBusyId(skillId);
@@ -153,7 +176,7 @@ export default function AdminQueuePage() {
     <main className="admin-shell">
       <header className="admin-topbar">
         <Link className="brand" href="/" aria-label="skillbase 홈"><span className="brand-mark">s<span>·</span></span><span>skillbase</span></Link>
-        <Link className="admin-back" href="/">카탈로그로 돌아가기 ↗</Link>
+        <div className="admin-header-actions"><a className="admin-export" href="/api/admin/export">데이터 백업 ↓</a><Link className="admin-back" href="/">카탈로그로 돌아가기 ↗</Link></div>
       </header>
 
       <section className="admin-hero">
@@ -166,6 +189,13 @@ export default function AdminQueuePage() {
           <div><strong>{counts.published}</strong><span>공개됨</span></div>
           <div><strong>{counts.rejected}</strong><span>반려됨</span></div>
         </div>
+        {metrics && <div className="admin-observability" aria-label="최근 30일 검증 지표">
+          <span>최근 {metrics.windowDays}일 검증 {metrics.total}건</span>
+          <span>공식 CLI {metrics.officialCli}건</span>
+          <span>fallback {metrics.fallback}건 ({metrics.fallbackRate}%)</span>
+          <span>대기·실패 {metrics.queued + metrics.failed}건</span>
+          {metrics.averageDurationMs != null && <span>평균 {Math.round(metrics.averageDurationMs / 1000)}초</span>}
+        </div>}
       </section>
 
       <section className="admin-content">

@@ -74,7 +74,7 @@ test("keeps the scheduled Agent Skills collection pipeline configured", async ()
 });
 
 test("keeps the operator approval queue and publication gate configured", async () => {
-  const [schema, sync, route, operator, adminPage, migration, verification, callback, verificationRoute, verificationMigration] = await Promise.all([
+  const [schema, sync, route, operator, adminPage, migration, verification, callback, verificationRoute, verificationMigration, metricsRoute, exportRoute, observabilityMigration] = await Promise.all([
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/sync.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/admin/queue/route.ts", import.meta.url), "utf8"),
@@ -85,6 +85,9 @@ test("keeps the operator approval queue and publication gate configured", async 
     readFile(new URL("../app/api/admin/verification/callback/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/admin/verification/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0003_supreme_brood.sql", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/admin/metrics/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/admin/export/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0004_verification_observability.sql", import.meta.url), "utf8"),
   ]);
 
   assert.match(schema, /approvalStatus/);
@@ -106,4 +109,10 @@ test("keeps the operator approval queue and publication gate configured", async 
   assert.match(callback, /verificationMethod/);
   assert.match(verificationRoute, /jobStatus === "queued"/);
   assert.match(verificationMigration, /verification_status` = 'legacy'/);
+  assert.match(schema, /verificationMethod/);
+  assert.match(verification, /getVerificationMetrics/);
+  assert.match(metricsRoute, /getVerificationMetrics/);
+  assert.match(exportRoute, /content-disposition/);
+  assert.match(observabilityMigration, /verification_method/);
+  assert.match(adminPage, /데이터 백업/);
 });

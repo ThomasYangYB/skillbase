@@ -23,10 +23,13 @@ type SandboxResultPayload = {
   verificationMethod?: SandboxVerificationMethod;
   summary?: string;
   findings?: unknown[];
+  durationMs?: number;
   completedAt?: string;
 };
 
-const VERIFIER_VERSION = "static-1";
+const VERIFIER_VERSION = "static-2";
+const SANDBOX_VERIFIER_VERSION = "sandbox-adapter-3";
+const SANDBOX_QUEUE_TIMEOUT_MS = 30 * 60 * 1000;
 
 function now() {
   return new Date().toISOString();
@@ -125,16 +128,18 @@ function sandboxResultUrl(adapterUrl: string, jobId: string) {
   return url;
 }
 
-async function applySandboxResult(env: VerificationEnv, row: { id: string; skill_id: string; source_hash: string }, payload: SandboxResultPayload) {
+async function applySandboxResult(env: VerificationEnv, row: { id: string; skill_id: string; source_hash: string; created_at: string }, payload: SandboxResultPayload) {
   if (!env.DB || !payload.status || payload.status === "queued" || payload.sourceHash !== row.source_hash) return false;
   const finishedAt = payload.completedAt ?? now();
+  const measuredDuration = payload.durationMs ?? Math.max(0, Date.parse(finishedAt) - Date.parse(row.created_at));
+  const durationMs = Number.isFinite(measuredDuration) ? Math.min(Math.max(Math.round(measuredDuration), 0), 86_400_000) : null;
   const summary = payload.summary?.trim() || (payload.status === "passed" ? "격리 환경 설치 검증을 통과했습니다." : "격리 환경 설치 검증에 실패했습니다.");
   const findings = Array.isArray(payload.findings) ? payload.findings : [];
   const verificationStatus: VerificationStatus = payload.status === "passed"
     ? payload.verificationMethod === "integrity_fallback" ? "sandbox_fallback_passed" : "sandbox_passed"
     : "sandbox_failed";
   await env.DB.batch([
-    env.DB.prepare("UPDATE skill_verification_jobs SET status = ?, summary = ?, findings_json = ?, finished_at = ? WHERE id = ? AND source_hash = ?").bind(payload.status, summary, JSON.stringify(findings), finishedAt, row.id, row.source_hash),
+    env.DB.prepare("UPDATE skill_verification_jobs SET status = ?, summary = ?, findings_json = ?, verification_method = ?, duration_ms = ?, finished_at = ? WHERE id = ? AND source_hash = ?").bind(payload.status, summary, JSON.stringify(findings), payload.verificationMethod ?? null, durationMs, finishedAt, row.id, row.source_hash),
     env.DB.prepare("UPDATE skills SET verification_status = ?, verification_updated_at = ?, verification_summary = ? WHERE id = ? AND content_hash = ?").bind(verificationStatus, finishedAt, summary, row.skill_id, row.source_hash),
   ]);
   return true;
@@ -143,8 +148,8 @@ async function applySandboxResult(env: VerificationEnv, row: { id: string; skill
 export async function refreshSandboxVerificationJobs(env: VerificationEnv, skillId?: string) {
   if (!env.DB || !env.SKILLBASE_SANDBOX_URL || !env.SKILLBASE_SANDBOX_TOKEN) return 0;
   const rows = skillId
-    ? await env.DB.prepare("SELECT id, skill_id, source_hash FROM skill_verification_jobs WHERE mode = 'sandbox' AND status = 'queued' AND skill_id = ? ORDER BY created_at ASC LIMIT 20").bind(skillId).all<{ id: string; skill_id: string; source_hash: string }>()
-    : await env.DB.prepare("SELECT id, skill_id, source_hash FROM skill_verification_jobs WHERE mode = 'sandbox' AND status = 'queued' ORDER BY created_at ASC LIMIT 50").all<{ id: string; skill_id: string; source_hash: string }>();
+    ? await env.DB.prepare("SELECT id, skill_id, source_hash, created_at FROM skill_verification_jobs WHERE mode = 'sandbox' AND status = 'queued' AND skill_id = ? ORDER BY created_at ASC LIMIT 20").bind(skillId).all<{ id: string; skill_id: string; source_hash: string; created_at: string }>()
+    : await env.DB.prepare("SELECT id, skill_id, source_hash, created_at FROM skill_verification_jobs WHERE mode = 'sandbox' AND status = 'queued' ORDER BY created_at ASC LIMIT 50").all<{ id: string; skill_id: string; source_hash: string; created_at: string }>();
   let updated = 0;
   for (const row of rows.results ?? []) {
     try {
@@ -153,9 +158,21 @@ export async function refreshSandboxVerificationJobs(env: VerificationEnv, skill
       });
       if (!response.ok) continue;
       const payload = await response.json() as SandboxResultPayload;
-      if (await applySandboxResult(env, row, payload)) updated += 1;
+      if (await applySandboxResult(env, row, payload)) {
+        updated += 1;
+        continue;
+      }
+      if (Date.now() - Date.parse(row.created_at) > SANDBOX_QUEUE_TIMEOUT_MS) {
+        const finishedAt = now();
+        await env.DB.prepare("UPDATE skill_verification_jobs SET status = 'failed', summary = ?, verification_method = NULL, finished_at = ? WHERE id = ? AND status = 'queued'").bind("Sandbox Queue 작업이 30분 안에 완료되지 않아 만료 처리되었습니다. 다시 검증을 요청하세요.", finishedAt, row.id).run();
+        updated += 1;
+      }
     } catch {
-      // The queue remains authoritative while the adapter is temporarily unavailable.
+      if (Date.now() - Date.parse(row.created_at) > SANDBOX_QUEUE_TIMEOUT_MS) {
+        const finishedAt = now();
+        await env.DB.prepare("UPDATE skill_verification_jobs SET status = 'failed', summary = ?, verification_method = NULL, finished_at = ? WHERE id = ? AND status = 'queued'").bind("Sandbox 어댑터가 30분 안에 결과를 반환하지 않아 만료 처리되었습니다. 다시 검증을 요청하세요.", finishedAt, row.id).run();
+        updated += 1;
+      }
     }
   }
   return updated;
@@ -174,7 +191,7 @@ export async function runStaticVerification(env: VerificationEnv, skillId: strin
     const scan = scanDocument(raw, String(skill.source_url), String(skill.name));
     const finishedAt = now();
     await db.batch([
-      db.prepare("UPDATE skill_verification_jobs SET status = ?, summary = ?, findings_json = ?, finished_at = ? WHERE id = ?").bind(scan.jobStatus, scan.summary, JSON.stringify(scan.findings), finishedAt, jobId),
+      db.prepare("UPDATE skill_verification_jobs SET status = ?, summary = ?, findings_json = ?, verification_method = 'static', duration_ms = ?, finished_at = ? WHERE id = ?").bind(scan.jobStatus, scan.summary, JSON.stringify(scan.findings), Math.max(0, Date.parse(finishedAt) - Date.parse(createdAt)), finishedAt, jobId),
       db.prepare("UPDATE skills SET verification_status = ?, verification_updated_at = ?, verification_summary = ? WHERE id = ? AND content_hash = ?").bind(scan.status, finishedAt, scan.summary, skillId, sourceHash),
     ]);
     return { jobId, mode: "static" as const, status: scan.status, jobStatus: scan.jobStatus, summary: scan.summary, findings: scan.findings, contentBytes: scan.contentBytes };
@@ -193,7 +210,7 @@ export async function requestSandboxVerification(env: VerificationEnv, skillId: 
   const createdAt = now();
   const jobId = crypto.randomUUID();
   const sourceHash = String(skill.content_hash);
-  await db.prepare("INSERT INTO skill_verification_jobs (id, skill_id, mode, status, requested_by, requested_email, source_hash, verifier_version, created_at) VALUES (?, ?, 'sandbox', 'queued', ?, ?, ?, 'sandbox-adapter-2', ?)").bind(jobId, skillId, actor.id, actor.email ?? null, sourceHash, createdAt).run();
+  await db.prepare("INSERT INTO skill_verification_jobs (id, skill_id, mode, status, requested_by, requested_email, source_hash, verifier_version, created_at) VALUES (?, ?, 'sandbox', 'queued', ?, ?, ?, ?, ?)").bind(jobId, skillId, actor.id, actor.email ?? null, sourceHash, SANDBOX_VERIFIER_VERSION, createdAt).run();
   if (!env.SKILLBASE_SANDBOX_URL) {
     const summary = "Cloudflare Sandbox 어댑터가 연결되지 않았습니다. 정적 검사 결과만 사용하세요.";
     await db.prepare("UPDATE skill_verification_jobs SET status = 'unavailable', summary = ?, finished_at = ? WHERE id = ?").bind(summary, now(), jobId).run();
@@ -219,7 +236,7 @@ export async function requestSandboxVerification(env: VerificationEnv, skillId: 
       ? payload.verificationMethod === "integrity_fallback" ? "sandbox_fallback_passed" : "sandbox_passed"
       : "sandbox_failed";
     await db.batch([
-      db.prepare("UPDATE skill_verification_jobs SET status = ?, external_job_id = ?, summary = ?, findings_json = ?, finished_at = ? WHERE id = ?").bind(jobStatus, payload.externalJobId ?? null, summary, JSON.stringify(findings), passed || failed ? now() : null, jobId),
+      db.prepare("UPDATE skill_verification_jobs SET status = ?, external_job_id = ?, summary = ?, findings_json = ?, verification_method = ?, duration_ms = ?, finished_at = ? WHERE id = ?").bind(jobStatus, payload.externalJobId ?? null, summary, JSON.stringify(findings), passed || failed ? payload.verificationMethod ?? null : null, passed || failed ? Math.max(0, Date.now() - Date.parse(createdAt)) : null, passed || failed ? now() : null, jobId),
       ...(passed || failed ? [db.prepare("UPDATE skills SET verification_status = ?, verification_updated_at = ?, verification_summary = ? WHERE id = ? AND content_hash = ?").bind(verificationStatus, now(), summary, skillId, sourceHash)] : []),
     ]);
     return { jobId, mode: "sandbox" as const, status: passed ? verificationStatus : failed ? "sandbox_failed" as const : "unverified" as const, jobStatus: passed ? "passed" as const : failed ? "failed" as const : "queued" as const, summary, findings };
@@ -232,7 +249,7 @@ export async function requestSandboxVerification(env: VerificationEnv, skillId: 
 
 export async function listVerificationJobs(db: D1Database, skillId: string, limit = 20) {
   await getStoredSkillRecord(db, skillId);
-  const rows = await db.prepare("SELECT id, skill_id, mode, status, verifier_version, summary, findings_json, external_job_id, created_at, started_at, finished_at FROM skill_verification_jobs WHERE skill_id = ? ORDER BY created_at DESC LIMIT ?").bind(skillId, Math.min(Math.max(limit, 1), 50)).all<Record<string, unknown>>();
+  const rows = await db.prepare("SELECT id, skill_id, mode, status, verifier_version, summary, findings_json, verification_method, duration_ms, external_job_id, created_at, started_at, finished_at FROM skill_verification_jobs WHERE skill_id = ? ORDER BY created_at DESC LIMIT ?").bind(skillId, Math.min(Math.max(limit, 1), 50)).all<Record<string, unknown>>();
   return (rows.results ?? []).map((row) => ({
     id: String(row.id),
     skillId: String(row.skill_id),
@@ -240,10 +257,34 @@ export async function listVerificationJobs(db: D1Database, skillId: string, limi
     status: String(row.status),
     verifierVersion: String(row.verifier_version),
     summary: row.summary ? String(row.summary) : null,
+    verificationMethod: row.verification_method ? String(row.verification_method) : null,
+    durationMs: row.duration_ms == null ? null : Number(row.duration_ms),
     findings: (() => { try { const parsed = JSON.parse(String(row.findings_json ?? "[]")); return Array.isArray(parsed) ? parsed : []; } catch { return []; } })(),
     externalJobId: row.external_job_id ? String(row.external_job_id) : null,
     createdAt: String(row.created_at),
     startedAt: row.started_at ? String(row.started_at) : null,
     finishedAt: row.finished_at ? String(row.finished_at) : null,
   }));
+}
+
+export async function getVerificationMetrics(db: D1Database, windowDays = 30) {
+  const safeDays = Math.min(Math.max(Math.round(windowDays), 1), 365);
+  const since = new Date(Date.now() - safeDays * 86_400_000).toISOString();
+  const rows = await db.prepare("SELECT status, mode, verification_method, duration_ms FROM skill_verification_jobs WHERE created_at >= ? ORDER BY created_at DESC LIMIT 5000").bind(since).all<Record<string, unknown>>();
+  const jobs = rows.results ?? [];
+  const durations = jobs.filter((row) => row.duration_ms != null).map((row) => Number(row.duration_ms)).filter((value) => Number.isFinite(value) && value >= 0);
+  const count = (predicate: (row: Record<string, unknown>) => boolean) => jobs.filter(predicate).length;
+  const total = jobs.length;
+  return {
+    windowDays: safeDays,
+    total,
+    passed: count((row) => row.status === "passed"),
+    failed: count((row) => row.status === "failed" || row.status === "blocked"),
+    queued: count((row) => row.status === "queued" || row.status === "running"),
+    officialCli: count((row) => row.verification_method === "official_cli"),
+    fallback: count((row) => row.verification_method === "integrity_fallback"),
+    static: count((row) => row.mode === "static"),
+    averageDurationMs: durations.length ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length) : null,
+    fallbackRate: total ? Math.round((count((row) => row.verification_method === "integrity_fallback") / total) * 1000) / 10 : 0,
+  };
 }

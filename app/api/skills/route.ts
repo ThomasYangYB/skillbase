@@ -12,6 +12,8 @@ export async function GET(request: Request) {
     url.searchParams.get("q")?.trim() ?? "",
     url.searchParams.get("region")?.trim() ?? "",
     url.searchParams.get("category")?.trim() ?? "",
+    url.searchParams.get("verification")?.trim() ?? "",
+    url.searchParams.get("sort")?.trim() ?? "recommended",
     Number(url.searchParams.get("limit") ?? 120),
   );
   return Response.json({ skills, source: "d1", collectedAt: new Date().toISOString() }, {

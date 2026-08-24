@@ -20,6 +20,7 @@ type StoredVerificationResult = {
   verificationMethod?: "official_cli" | "integrity_fallback";
   summary: string;
   findings: unknown[];
+  durationMs?: number;
   completedAt: string;
 };
 
@@ -100,6 +101,7 @@ async function notifyCatalogBestEffort(request: VerifyRequest, env: Env, status:
 }
 
 async function verify(request: VerifyRequest, env: Env) {
+  const startedAt = Date.now();
   const parsed = parseInstallCommand(request.install);
   const source = sourceRepository(request.sourceUrl);
   if (!parsed || !source) throw new Error("설치 명령 또는 출처 형식이 허용 목록과 일치하지 않습니다.");
@@ -113,7 +115,7 @@ async function verify(request: VerifyRequest, env: Env) {
     let primary: Awaited<ReturnType<typeof sandbox.exec>> | null = null;
     let primaryError: string | null = null;
     try {
-      primary = await sandbox.exec(command, { cwd: "/workspace", timeout: Math.min(request.constraints.timeoutMs, 60000) });
+      primary = await sandbox.exec(command, { cwd: "/workspace", timeout: Math.min(request.constraints.timeoutMs, 90000) });
     } catch (error) {
       primaryError = error instanceof Error ? error.message : "공식 CLI 실행이 중단되었습니다.";
     }
@@ -148,25 +150,26 @@ async function verify(request: VerifyRequest, env: Env) {
       { code: "sandbox-install", severity: success ? usedFallback ? "warning" : "info" : "blocker", title: success ? usedFallback ? "보조 격리 설치 성공" : "격리 설치 성공" : "격리 설치 확인 실패", detail: output || summary },
       { code: "sandbox-network-policy", severity: "info", title: "네트워크 정책 적용", detail: "인터넷은 기본 차단되고 GitHub·npm·Skills 감사 메타데이터 호스트만 허용했습니다." },
     ];
-    return { success, summary, findings, externalJobId: safeSandboxId(request.jobId), verificationMethod: usedFallback ? "integrity_fallback" as const : "official_cli" as const };
+    return { success, summary, findings, externalJobId: safeSandboxId(request.jobId), verificationMethod: usedFallback ? "integrity_fallback" as const : "official_cli" as const, durationMs: Date.now() - startedAt };
   } finally {
     await sandbox.destroy();
   }
 }
 
 async function processVerification(request: VerifyRequest, env: Env) {
+  const startedAt = Date.now();
   let result: Awaited<ReturnType<typeof verify>>;
   try {
     result = await verify(request, env);
   } catch (error) {
     const summary = error instanceof Error ? error.message : "격리 설치 검증에 실패했습니다.";
     const findings = [{ code: "sandbox-error", severity: "blocker", title: "격리 검증 실행 오류", detail: summary }];
-    await storeResult(request, env, { status: "failed", summary, findings });
+    await storeResult(request, env, { status: "failed", summary, findings, durationMs: Date.now() - startedAt });
     await notifyCatalogBestEffort(request, env, "failed", undefined, summary, findings);
     return;
   }
   console.log(JSON.stringify({ event: "verification-result", jobId: safeSandboxId(request.jobId), success: result.success, method: result.verificationMethod }));
-  await storeResult(request, env, { status: result.success ? "passed" : "failed", verificationMethod: result.success ? result.verificationMethod : undefined, summary: result.summary, findings: result.findings });
+  await storeResult(request, env, { status: result.success ? "passed" : "failed", verificationMethod: result.success ? result.verificationMethod : undefined, summary: result.summary, findings: result.findings, durationMs: result.durationMs });
   await notifyCatalogBestEffort(request, env, result.success ? "passed" : "failed", result.success ? result.verificationMethod : undefined, result.summary, result.findings);
 }
 

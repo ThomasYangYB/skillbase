@@ -65,6 +65,8 @@ export const skillVerificationJobs = sqliteTable("skill_verification_jobs", {
   verifierVersion: text("verifier_version").notNull(),
   summary: text("summary"),
   findingsJson: text("findings_json").notNull().default("[]"),
+  verificationMethod: text("verification_method"),
+  durationMs: integer("duration_ms"),
   externalJobId: text("external_job_id"),
   createdAt: text("created_at").notNull(),
   startedAt: text("started_at"),

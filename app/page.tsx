@@ -20,6 +20,9 @@ type Skill = {
   prompt: string;
   install: string;
   appUrl: string;
+  verificationStatus?: string;
+  license?: string | null;
+  updatedAt?: string;
 };
 
 const skills: Skill[] = [
@@ -386,6 +389,9 @@ const skills: Skill[] = [
 ];
 
 const categoryNames = ["전체", "개발·IT", "디자인·크리에이티브", "문서·사무", "리서치·데이터", "콘텐츠·마케팅", "한국어·문서", "업무 자동화"];
+const verificationFilters = ["전체", "검증됨", "fallback", "검토 필요"] as const;
+type VerificationFilter = typeof verificationFilters[number];
+type SortMode = "추천순" | "최신순" | "이름순";
 
 function CheckIcon() {
   return <span className="check-icon" aria-hidden="true">✓</span>;
@@ -395,6 +401,8 @@ export default function Home() {
   const [catalogSkills, setCatalogSkills] = useState<Skill[]>(skills);
   const [activeCategory, setActiveCategory] = useState("전체");
   const [activeRegion, setActiveRegion] = useState<"전체" | "국내" | "해외">("전체");
+  const [activeVerification, setActiveVerification] = useState<VerificationFilter>("전체");
+  const [sortMode, setSortMode] = useState<SortMode>("추천순");
   const [query, setQuery] = useState("");
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [copied, setCopied] = useState(false);
@@ -437,13 +445,24 @@ export default function Home() {
 
   const filteredSkills = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
-    return catalogSkills.filter((skill) => {
+    const filtered = catalogSkills.filter((skill) => {
       const matchesCategory = activeCategory === "전체" || skill.category === activeCategory;
       const matchesRegion = activeRegion === "전체" || skill.region === activeRegion;
+      const verification = skill.verificationStatus ?? "legacy";
+      const matchesVerification = activeVerification === "전체"
+        || activeVerification === "검증됨" && ["sandbox_passed", "static_passed", "legacy"].includes(verification)
+        || activeVerification === "fallback" && verification === "sandbox_fallback_passed"
+        || activeVerification === "검토 필요" && ["unverified", "static_warning", "static_blocked", "sandbox_failed", "sandbox_unavailable"].includes(verification);
       const searchable = [skill.name, skill.category, skill.description, skill.source, skill.region, ...skill.tags, ...skill.compatibility].join(" ").toLowerCase();
-      return matchesCategory && matchesRegion && (!normalizedQuery || searchable.includes(normalizedQuery));
+      return matchesCategory && matchesRegion && matchesVerification && (!normalizedQuery || searchable.includes(normalizedQuery));
     });
-  }, [activeCategory, activeRegion, catalogSkills, query]);
+    return [...filtered].sort((left, right) => {
+      if (sortMode === "이름순") return left.name.localeCompare(right.name);
+      if (sortMode === "최신순") return String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? ""));
+      const score = (skill: Skill) => skill.verificationStatus === "sandbox_passed" ? 4 : skill.verificationStatus === "static_passed" ? 3 : skill.verificationStatus === "sandbox_fallback_passed" ? 2 : skill.trust === "원본 확인" ? 1 : 0;
+      return score(right) - score(left) || left.name.localeCompare(right.name);
+    });
+  }, [activeCategory, activeRegion, activeVerification, catalogSkills, query, sortMode]);
 
   const openSkill = (skill: Skill) => {
     setSelectedSkill(skill);
@@ -570,8 +589,17 @@ export default function Home() {
             </div>
             <div className="catalog-controls">
               <span>{filteredSkills.length}개 표시</span>
-              <button className="sort-button">추천순 <span>⌄</span></button>
+              <select className="sort-select" value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)} aria-label="정렬 기준">
+                <option value="추천순">추천순</option>
+                <option value="최신순">최신순</option>
+                <option value="이름순">이름순</option>
+              </select>
             </div>
+          </div>
+
+          <div className="catalog-filters" aria-label="검증 상태 필터">
+            <span>검증 상태</span>
+            {verificationFilters.map((filter) => <button key={filter} className={activeVerification === filter ? "selected" : ""} onClick={() => setActiveVerification(filter)}>{filter}</button>)}
           </div>
 
           {filteredSkills.length > 0 ? (
@@ -604,7 +632,7 @@ export default function Home() {
             <div className="empty-state"><strong>아직 맞는 Skill을 찾지 못했어요.</strong><span>다른 검색어 또는 카테고리로 다시 찾아보세요.</span></div>
           )}
 
-          <div className="catalog-footer"><span>{syncSummary ? `${syncSummary.sources.length}개 출처를 주기적으로 확인합니다.` : "공개 원본 기준으로 계속 보강됩니다."}</span><button onClick={() => { setActiveCategory("전체"); setActiveRegion("전체"); setQuery(""); }}>전체 Skill 보기 <span>→</span></button></div>
+          <div className="catalog-footer"><span>{syncSummary ? `${syncSummary.sources.length}개 출처를 주기적으로 확인합니다.` : "공개 원본 기준으로 계속 보강됩니다."}</span><button onClick={() => { setActiveCategory("전체"); setActiveRegion("전체"); setActiveVerification("전체"); setSortMode("추천순"); setQuery(""); }}>전체 Skill 보기 <span>→</span></button></div>
         </div>
       </section>
 
