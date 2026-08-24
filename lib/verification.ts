@@ -287,7 +287,7 @@ export async function listVerificationJobs(db: D1Database, skillId: string, limi
 export async function getVerificationMetrics(db: D1Database, windowDays = 30) {
   const safeDays = Math.min(Math.max(Math.round(windowDays), 1), 365);
   const since = new Date(Date.now() - safeDays * 86_400_000).toISOString();
-  const rows = await db.prepare("SELECT status, mode, verification_method, duration_ms FROM skill_verification_jobs WHERE created_at >= ? ORDER BY created_at DESC LIMIT 5000").bind(since).all<Record<string, unknown>>();
+  const rows = await db.prepare("SELECT status, mode, verification_method, summary, duration_ms FROM skill_verification_jobs WHERE created_at >= ? ORDER BY created_at DESC LIMIT 5000").bind(since).all<Record<string, unknown>>();
   const jobs = rows.results ?? [];
   const durations = jobs.filter((row) => row.duration_ms != null).map((row) => Number(row.duration_ms)).filter((value) => Number.isFinite(value) && value >= 0);
   const count = (predicate: (row: Record<string, unknown>) => boolean) => jobs.filter(predicate).length;
