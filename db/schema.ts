@@ -23,12 +23,31 @@ export const skills = sqliteTable("skills", {
   sourceUpdatedAt: text("source_updated_at"),
   lastSeenAt: text("last_seen_at").notNull(),
   status: text("status").notNull().default("active"),
+  approvalStatus: text("approval_status").notNull().default("review"),
+  approvalUpdatedAt: text("approval_updated_at"),
+  approvedBy: text("approved_by"),
+  publishedAt: text("published_at"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (table) => ({
   statusCategoryIdx: index("idx_skills_status_category").on(table.status, table.category),
+  approvalStatusIdx: index("idx_skills_approval_status").on(table.approvalStatus, table.updatedAt),
   regionIdx: index("idx_skills_region").on(table.region),
   lastSeenIdx: index("idx_skills_last_seen").on(table.lastSeenAt),
+}));
+
+export const skillReviewEvents = sqliteTable("skill_review_events", {
+  id: text("id").primaryKey(),
+  skillId: text("skill_id").notNull(),
+  action: text("action").notNull(),
+  fromStatus: text("from_status"),
+  toStatus: text("to_status").notNull(),
+  actorId: text("actor_id").notNull(),
+  actorEmail: text("actor_email"),
+  note: text("note"),
+  createdAt: text("created_at").notNull(),
+}, (table) => ({
+  skillIdx: index("idx_skill_review_events_skill").on(table.skillId, table.createdAt),
 }));
 
 export const syncSources = sqliteTable("sync_sources", {

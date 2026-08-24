@@ -8,6 +8,7 @@ interface Env {
   DB: D1Database;
   GITHUB_TOKEN?: string;
   SKILLBASE_SYNC_TOKEN?: string;
+  SKILLBASE_OPERATOR_USER_ID?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {

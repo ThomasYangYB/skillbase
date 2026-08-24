@@ -399,7 +399,7 @@ export default function Home() {
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [copied, setCopied] = useState(false);
   const [verified, setVerified] = useState(false);
-  const [syncSummary, setSyncSummary] = useState<{ activeSkills: number; latestRun?: { status?: string; finished_at?: string | null }; sources: unknown[] } | null>(null);
+  const [syncSummary, setSyncSummary] = useState<{ activeSkills: number; pendingReviews: number; latestRun?: { status?: string; finished_at?: string | null }; sources: unknown[] } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -417,7 +417,7 @@ export default function Home() {
       try {
         const response = await fetch("/api/sync", { cache: "no-store" });
         if (!response.ok) return;
-        const payload = await response.json() as { activeSkills: number; latestRun?: { status?: string; finished_at?: string | null }; sources: unknown[] };
+        const payload = await response.json() as { activeSkills: number; pendingReviews: number; latestRun?: { status?: string; finished_at?: string | null }; sources: unknown[] };
         if (!cancelled) setSyncSummary(payload);
       } catch {
         // Sync status is informative and should not block catalog rendering.
@@ -478,6 +478,7 @@ export default function Home() {
         <nav className="main-nav" aria-label="주요 메뉴">
           <a className="active" href="#explore">탐색</a>
           <a href="#verification">수집 상태</a>
+          <a href="/admin">운영자 큐</a>
           <a href="#submit">Skill 등록</a>
         </nav>
         <div className="top-actions">
@@ -527,7 +528,7 @@ export default function Home() {
         <div><span className="strip-number">{catalogSkills.length}</span><span>수집된 Skills</span></div>
         <div><span className="strip-number">{platformCount}</span><span>호환 플랫폼</span></div>
         <div><span className="strip-number">{sourceCount}</span><span>원본 출처</span></div>
-        <div className="trust-note"><CheckIcon /><span>{syncSummary?.latestRun ? "최근 자동 수집 완료 · 설치 전 검토 필요" : "매일 자동 수집 예약 · 설치 전 검토 필요"}</span></div>
+        <div className="trust-note"><CheckIcon /><span>{syncSummary?.pendingReviews ? `검토 대기 ${syncSummary.pendingReviews}개 · 공개 전 확인 필요` : syncSummary?.latestRun ? "최근 자동 수집 완료 · 공개 전 확인 완료" : "매일 자동 수집 예약 · 공개 전 확인"}</span></div>
       </section>
 
       <section className="explore-layout" id="explore">
@@ -554,8 +555,9 @@ export default function Home() {
             <span className="tip-icon">✳</span>
             <strong>자동 수집 파이프라인</strong>
             <p>GitHub의 SKILL.md, skills.sh 리더보드, 국내 디렉터리를 매일 확인하고 표준 형식·중복·권한 신호를 검사합니다.</p>
-            <span className="sync-state">{syncSummary?.latestRun?.status === "completed" ? "마지막 실행 성공" : syncSummary?.latestRun ? "일부 출처 확인 필요" : "첫 자동 수집 대기 중"}</span>
+            <span className="sync-state">{syncSummary?.pendingReviews ? `검토 대기 ${syncSummary.pendingReviews}개` : syncSummary?.latestRun?.status === "completed" ? "마지막 실행 성공" : syncSummary?.latestRun ? "일부 출처 확인 필요" : "첫 자동 수집 대기 중"}</span>
             <a href="/api/sync" target="_blank" rel="noreferrer">수집 상태 보기 ↗</a>
+            <a href="/admin">운영자 검토 큐 열기 ↗</a>
           </div>
         </aside>
 

@@ -37,6 +37,7 @@ test("server-renders the skillbase catalog", async () => {
   assert.match(html, /humanizer/);
   assert.match(html, /frontend-design/);
   assert.match(html, /권한 위험도/);
+  assert.match(html, /운영자 큐/);
   assert.doesNotMatch(html, /Your site is taking shape|react-loading-skeleton|codex-preview/);
 });
 
@@ -70,4 +71,25 @@ test("keeps the scheduled Agent Skills collection pipeline configured", async ()
   assert.match(worker, /async scheduled/);
   assert.match(vite, /crons: \["17 3 \* \* \*"\]/);
   assert.match(hosting, /"d1": "DB"/);
+});
+
+test("keeps the operator approval queue and publication gate configured", async () => {
+  const [schema, sync, route, operator, adminPage, migration] = await Promise.all([
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/sync.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/admin/queue/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/operator.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/admin/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0002_supreme_zodiak.sql", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(schema, /approvalStatus/);
+  assert.match(schema, /skillReviewEvents/);
+  assert.match(sync, /approval_status = 'published'/);
+  assert.match(sync, /CASE WHEN skills\.content_hash <> excluded\.content_hash THEN 'review'/);
+  assert.match(operator, /oai-authenticated-user-id/);
+  assert.match(route, /changeSkillApproval/);
+  assert.match(adminPage, /검토 필요/);
+  assert.match(adminPage, /공개하기/);
+  assert.match(migration, /UPDATE `skills` SET `approval_status` = 'published'/);
 });

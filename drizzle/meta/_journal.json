@@ -15,6 +15,13 @@
       "when": 1787563294363,
       "tag": "0001_dear_marten_broadcloak",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1787564533601,
+      "tag": "0002_supreme_zodiak",
+      "breakpoints": true
     }
   ]
 }
