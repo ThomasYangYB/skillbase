@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Skill = {
   id: string;
@@ -386,35 +386,64 @@ const skills: Skill[] = [
 ];
 
 const categoryNames = ["전체", "개발·IT", "디자인·크리에이티브", "문서·사무", "리서치·데이터", "콘텐츠·마케팅", "한국어·문서", "업무 자동화"];
-const categories = categoryNames.map((label) => ({
-  label,
-  count: label === "전체" ? skills.length : skills.filter((skill) => skill.category === label).length,
-}));
-
-const platformCount = new Set(skills.flatMap((skill) => skill.compatibility)).size;
-const sourceCount = new Set(skills.map((skill) => skill.source)).size;
 
 function CheckIcon() {
   return <span className="check-icon" aria-hidden="true">✓</span>;
 }
 
 export default function Home() {
+  const [catalogSkills, setCatalogSkills] = useState<Skill[]>(skills);
   const [activeCategory, setActiveCategory] = useState("전체");
   const [activeRegion, setActiveRegion] = useState<"전체" | "국내" | "해외">("전체");
   const [query, setQuery] = useState("");
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [copied, setCopied] = useState(false);
   const [verified, setVerified] = useState(false);
+  const [syncSummary, setSyncSummary] = useState<{ activeSkills: number; latestRun?: { status?: string; finished_at?: string | null }; sources: unknown[] } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadCatalog = async () => {
+      try {
+        const response = await fetch("/api/skills?limit=200", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json() as { skills?: Skill[] };
+        if (!cancelled && Array.isArray(payload.skills) && payload.skills.length > 0) setCatalogSkills(payload.skills);
+      } catch {
+        // The curated fallback keeps the catalog useful when D1 has not synced yet.
+      }
+    };
+    const loadSyncSummary = async () => {
+      try {
+        const response = await fetch("/api/sync", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json() as { activeSkills: number; latestRun?: { status?: string; finished_at?: string | null }; sources: unknown[] };
+        if (!cancelled) setSyncSummary(payload);
+      } catch {
+        // Sync status is informative and should not block catalog rendering.
+      }
+    };
+    void loadCatalog();
+    void loadSyncSummary();
+    return () => { cancelled = true; };
+  }, []);
+
+  const categories = categoryNames.map((label) => ({
+    label,
+    count: label === "전체" ? catalogSkills.length : catalogSkills.filter((skill) => skill.category === label).length,
+  }));
+  const platformCount = new Set(catalogSkills.flatMap((skill) => skill.compatibility)).size;
+  const sourceCount = new Set(catalogSkills.map((skill) => skill.source)).size;
 
   const filteredSkills = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
-    return skills.filter((skill) => {
+    return catalogSkills.filter((skill) => {
       const matchesCategory = activeCategory === "전체" || skill.category === activeCategory;
       const matchesRegion = activeRegion === "전체" || skill.region === activeRegion;
       const searchable = [skill.name, skill.category, skill.description, skill.source, skill.region, ...skill.tags, ...skill.compatibility].join(" ").toLowerCase();
       return matchesCategory && matchesRegion && (!normalizedQuery || searchable.includes(normalizedQuery));
     });
-  }, [activeCategory, activeRegion, query]);
+  }, [activeCategory, activeRegion, catalogSkills, query]);
 
   const openSkill = (skill: Skill) => {
     setSelectedSkill(skill);
@@ -448,7 +477,7 @@ export default function Home() {
         </a>
         <nav className="main-nav" aria-label="주요 메뉴">
           <a className="active" href="#explore">탐색</a>
-          <a href="#verification">검증 리포트</a>
+          <a href="#verification">수집 상태</a>
           <a href="#submit">Skill 등록</a>
         </nav>
         <div className="top-actions">
@@ -495,10 +524,10 @@ export default function Home() {
       </section>
 
       <section className="trust-strip" id="verification">
-        <div><span className="strip-number">{skills.length}</span><span>초기 수집 Skills</span></div>
+        <div><span className="strip-number">{catalogSkills.length}</span><span>수집된 Skills</span></div>
         <div><span className="strip-number">{platformCount}</span><span>호환 플랫폼</span></div>
         <div><span className="strip-number">{sourceCount}</span><span>원본 출처</span></div>
-        <div className="trust-note"><CheckIcon /><span>원본 링크·설치 경로 확인 · 설치 전 검토 필요</span></div>
+        <div className="trust-note"><CheckIcon /><span>{syncSummary?.latestRun ? "최근 자동 수집 완료 · 설치 전 검토 필요" : "매일 자동 수집 예약 · 설치 전 검토 필요"}</span></div>
       </section>
 
       <section className="explore-layout" id="explore">
@@ -521,11 +550,12 @@ export default function Home() {
           <button className={`filter-link ${activeRegion === "전체" ? "selected" : ""}`} onClick={() => setActiveRegion("전체")}><span>✦</span> 전체 출처</button>
           <button className={`filter-link ${activeRegion === "국내" ? "selected" : ""}`} onClick={() => setActiveRegion("국내")}><span>⌁</span> 국내 출처만</button>
           <button className={`filter-link ${activeRegion === "해외" ? "selected" : ""}`} onClick={() => setActiveRegion("해외")}><span>◌</span> 해외 출처만</button>
-          <div className="side-tip">
+          <div className="side-tip" id="sync">
             <span className="tip-icon">✳</span>
-            <strong>검증 범위를 확인하세요.</strong>
-            <p>현재는 원본 링크와 설치 경로를 확인한 초기 수집입니다. 실제 권한·스크립트 검토는 설치 전에 직접 하세요.</p>
-            <a href="#verification">자세히 보기 ↗</a>
+            <strong>자동 수집 파이프라인</strong>
+            <p>GitHub의 SKILL.md, skills.sh 리더보드, 국내 디렉터리를 매일 확인하고 표준 형식·중복·권한 신호를 검사합니다.</p>
+            <span className="sync-state">{syncSummary?.latestRun?.status === "completed" ? "마지막 실행 성공" : syncSummary?.latestRun ? "일부 출처 확인 필요" : "첫 자동 수집 대기 중"}</span>
+            <a href="/api/sync" target="_blank" rel="noreferrer">수집 상태 보기 ↗</a>
           </div>
         </aside>
 
@@ -572,7 +602,7 @@ export default function Home() {
             <div className="empty-state"><strong>아직 맞는 Skill을 찾지 못했어요.</strong><span>다른 검색어 또는 카테고리로 다시 찾아보세요.</span></div>
           )}
 
-          <div className="catalog-footer"><span>공개 원본 기준으로 계속 보강됩니다.</span><button onClick={() => { setActiveCategory("전체"); setActiveRegion("전체"); setQuery(""); }}>전체 Skill 보기 <span>→</span></button></div>
+          <div className="catalog-footer"><span>{syncSummary ? `${syncSummary.sources.length}개 출처를 주기적으로 확인합니다.` : "공개 원본 기준으로 계속 보강됩니다."}</span><button onClick={() => { setActiveCategory("전체"); setActiveRegion("전체"); setQuery(""); }}>전체 Skill 보기 <span>→</span></button></div>
         </div>
       </section>
 

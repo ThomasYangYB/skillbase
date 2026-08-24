@@ -1,5 +1,20 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "entries": []
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1787563272141,
+      "tag": "0000_aberrant_thunderbird",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1787563294363,
+      "tag": "0001_dear_marten_broadcloak",
+      "breakpoints": true
+    }
+  ]
 }

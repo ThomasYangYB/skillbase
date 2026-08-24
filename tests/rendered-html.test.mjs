@@ -31,8 +31,8 @@ test("server-renders the skillbase catalog", async () => {
   const html = await response.text();
   assert.match(html, /<title>skillbase — 실제 AI Skills 카탈로그<\/title>/i);
   assert.match(html, /AI Skill을 찾고/);
-  assert.match(html, /초기 수집 Skills/);
-  assert.match(html, /원본 링크·설치 경로 확인/);
+  assert.match(html, /수집된 Skills/);
+  assert.match(html, /매일 자동 수집 예약/);
   assert.match(html, /개발·IT/);
   assert.match(html, /humanizer/);
   assert.match(html, /frontend-design/);
@@ -53,4 +53,21 @@ test("keeps the installation and prompt workflow in the product source", async (
   assert.match(page, /sourceUrl/);
   assert.match(layout, /title: "skillbase — 실제 AI Skills 카탈로그"/);
   assert.match(layout, /<html lang="ko">/);
+});
+
+test("keeps the scheduled Agent Skills collection pipeline configured", async () => {
+  const [sync, worker, vite, hosting] = await Promise.all([
+    readFile(new URL("../lib/sync.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
+    readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(sync, /SKILL\.md/i);
+  assert.match(sync, /skills-sh-leaderboard/);
+  assert.match(sync, /directory-claude-korea/);
+  assert.match(sync, /contentHash/);
+  assert.match(worker, /async scheduled/);
+  assert.match(vite, /crons: \["17 3 \* \* \*"\]/);
+  assert.match(hosting, /"d1": "DB"/);
 });
