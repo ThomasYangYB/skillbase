@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "skillbase — 검증된 AI Skills",
-  description: "AI Skills를 탐색하고, 설치하고, 안전하게 실행하세요.",
+  title: "skillbase — 실제 AI Skills 카탈로그",
+  description: "공개 원본의 AI Skills를 출처·설치 경로와 함께 탐색하고 프롬프트를 복사하세요.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

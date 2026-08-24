@@ -29,10 +29,13 @@ test("server-renders the skillbase catalog", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>skillbase — 검증된 AI Skills<\/title>/i);
+  assert.match(html, /<title>skillbase — 실제 AI Skills 카탈로그<\/title>/i);
   assert.match(html, /AI Skill을 찾고/);
-  assert.match(html, /검증된 Skills/);
+  assert.match(html, /초기 수집 Skills/);
+  assert.match(html, /원본 링크·설치 경로 확인/);
   assert.match(html, /개발·IT/);
+  assert.match(html, /humanizer/);
+  assert.match(html, /frontend-design/);
   assert.match(html, /권한 위험도/);
   assert.doesNotMatch(html, /Your site is taking shape|react-loading-skeleton|codex-preview/);
 });
@@ -44,9 +47,10 @@ test("keeps the installation and prompt workflow in the product source", async (
   ]);
 
   assert.match(page, /navigator\.clipboard/);
-  assert.match(page, /설치 후 검증 실행/);
+  assert.match(page, /설치 후 확인 표시/);
   assert.match(page, /복사 후 앱 열기/);
-  assert.match(page, /호환성 확인됨/);
-  assert.match(layout, /title: "skillbase — 검증된 AI Skills"/);
+  assert.match(page, /원본 확인/);
+  assert.match(page, /sourceUrl/);
+  assert.match(layout, /title: "skillbase — 실제 AI Skills 카탈로그"/);
   assert.match(layout, /<html lang="ko">/);
 });
