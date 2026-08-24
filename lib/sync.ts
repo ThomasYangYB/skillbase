@@ -366,7 +366,7 @@ function extractSkillShLinks(html: string) {
   const matches = html.matchAll(/href=["']\/(?!api\/)([^"'/?]+\/[^"'/?]+\/[^"'#?]+)["']/g);
   for (const match of matches) {
     const path = match[1].split("/").map((part) => part.trim()).filter(Boolean);
-    if (path.length !== 3 || path.some((part) => part === "packs" || part === "topics" || part === "official")) continue;
+    if (path.length !== 3 || path.some((part) => part === "packs" || part === "topics" || part === "official") || path[0] === "site" || path[0].includes(".")) continue;
     const [owner, repo, name] = path;
     links.set(`${owner}/${repo}:${name}`, { repo: `${owner}/${repo}`, name, pageUrl: `https://www.skills.sh/${path.join("/")}` });
   }
