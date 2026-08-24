@@ -20,15 +20,28 @@ function verificationLabel(status?: string) {
   return "검증 결과 확인 필요";
 }
 
-export default function SkillDetailClient({ skill }: { skill: SkillDetail }) {
-  const [prompt, setPrompt] = useState(skill.prompt);
+export default function SkillDetailClient({ skillId }: { skillId: string }) {
+  const [skill, setSkill] = useState<SkillDetail | null>(null);
+  const [prompt, setPrompt] = useState("");
   const [input, setInput] = useState("");
   const [status, setStatus] = useState("");
   const [favorite, setFavorite] = useState(false);
 
   useEffect(() => {
+    fetch(`/api/skills/detail?id=${encodeURIComponent(skillId)}`, { cache: "no-store" }).then(async (response) => {
+      const payload = await response.json() as { skill?: SkillDetail; error?: string };
+      if (!response.ok || !payload.skill) throw new Error(payload.error ?? "공개된 Skill을 찾을 수 없습니다.");
+      setSkill(payload.skill);
+      setPrompt(payload.skill.prompt);
+    }).catch((error: unknown) => setStatus(error instanceof Error ? error.message : "Skill을 불러오지 못했습니다."));
+  }, [skillId]);
+
+  useEffect(() => {
+    if (!skill) return;
     fetch("/api/favorites", { cache: "no-store" }).then((response) => response.json()).then((payload: { ids?: string[] }) => setFavorite(payload.ids?.includes(skill.id) ?? false)).catch(() => undefined);
-  }, [skill.id]);
+  }, [skill]);
+
+  if (!skill) return <main className="detail-shell"><header className="detail-topbar"><Link className="brand" href="/" aria-label="skillbase 홈"><span className="brand-mark">s<span>·</span></span><span>skillbase</span></Link><Link className="detail-back" href="/">← 카탈로그</Link></header><div className="detail-loading" role="status">{status || "Skill 상세 정보를 불러오는 중입니다."}</div></main>;
 
   const track = (event: string) => {
     void fetch("/api/usage", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ skillId: skill.id, event }) }).catch(() => undefined);

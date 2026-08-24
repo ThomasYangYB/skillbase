@@ -1,33 +1,20 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
-import { getPublishedSkill } from "../../../lib/sync";
-import { runtimeEnv } from "../../../lib/runtime-env";
 import SkillDetailClient from "./SkillDetailClient";
 
 export const dynamic = "force-dynamic";
 
 type PageProps = { params: Promise<{ id: string[] }> };
 
-async function loadSkill(idParts: string[]) {
-  if (!runtimeEnv.DB) return null;
-  return getPublishedSkill(runtimeEnv.DB, idParts.join("/"));
-}
-
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { id } = await params;
-  const skill = await loadSkill(id);
-  if (!skill) return { title: "Skill을 찾을 수 없습니다 · skillbase" };
+  const name = decodeURIComponent(id.at(-1) ?? "Skill").replace(/[-_]/g, " ");
   return {
-    title: `${skill.name} · skillbase`,
-    description: skill.description,
-    openGraph: { title: `${skill.name} · skillbase`, description: skill.description, type: "article" },
-    twitter: { card: "summary", title: `${skill.name} · skillbase`, description: skill.description },
+    title: `${name} · skillbase`,
+    description: "원본 출처, 설치 경로, 검증 정보와 함께 확인하는 AI Skill 상세 페이지입니다.",
   };
 }
 
 export default async function SkillDetailPage({ params }: PageProps) {
   const { id } = await params;
-  const skill = await loadSkill(id);
-  if (!skill) notFound();
-  return <SkillDetailClient skill={skill} />;
+  return <SkillDetailClient skillId={id.join("/")} />;
 }
