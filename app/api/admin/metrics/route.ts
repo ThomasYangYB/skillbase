@@ -10,10 +10,8 @@ export async function GET(request: Request) {
   if (!getOperator(request)) return operatorErrorResponse();
   const days = Number(new URL(request.url).searchParams.get("days") ?? 30);
   try {
-    const [verification, sync] = await Promise.all([
-      getVerificationMetrics(runtimeEnv.DB, days),
-      getSyncStatus(runtimeEnv.DB),
-    ]);
+    const sync = await getSyncStatus(runtimeEnv.DB);
+    const verification = await getVerificationMetrics(runtimeEnv.DB, days);
     return Response.json({ verification, sync }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "운영 지표를 불러오지 못했습니다." }, { status: 500 });

@@ -98,3 +98,14 @@ export const syncRuns = sqliteTable("sync_runs", {
   rejected: integer("rejected").notNull().default(0),
   errorSummary: text("error_summary"),
 });
+
+export const skillFeedback = sqliteTable("skill_feedback", {
+  id: text("id").primaryKey(),
+  skillId: text("skill_id").notNull(),
+  type: text("type").notNull(),
+  message: text("message"),
+  actorId: text("actor_id"),
+  createdAt: text("created_at").notNull(),
+}, (table) => ({
+  skillIdx: index("idx_skill_feedback_skill").on(table.skillId, table.createdAt),
+}));

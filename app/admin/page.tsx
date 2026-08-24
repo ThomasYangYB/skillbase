@@ -25,6 +25,7 @@ type QueueItem = {
   verificationStatus: VerificationStatus;
   verificationUpdatedAt: string | null;
   verificationSummary: string | null;
+  license: string | null;
   lastSeenAt: string;
   approvalUpdatedAt: string | null;
 };
@@ -223,7 +224,7 @@ export default function AdminQueuePage() {
                   <a className="review-source" href={skill.sourceUrl} target="_blank" rel="noreferrer">원본 보기 ↗</a>
                 </div>
                 <p className="review-description">{skill.description}</p>
-                <div className="review-meta"><span>출처: {skill.source}</span><span>발견 경로: {skill.discoveredVia}</span><span>위험도: {skill.risk}</span><span>해시: {skill.contentHash.slice(0, 10)}</span><span>최근 확인: {formatDate(skill.lastSeenAt)}</span><span>검증: {formatDate(skill.verificationUpdatedAt)}</span></div>
+                <div className="review-meta"><span>출처: {skill.source}</span><span>발견 경로: {skill.discoveredVia}</span><span>위험도: {skill.risk}</span><span>라이선스: {skill.license ?? "미상"}</span><span>해시: {skill.contentHash.slice(0, 10)}</span><span>최근 확인: {formatDate(skill.lastSeenAt)}</span><span>검증: {formatDate(skill.verificationUpdatedAt)}</span></div>
                 {skill.verificationSummary && <p className="verification-summary">{skill.verificationSummary}</p>}
                 <div className="review-actions">
                   <button className="action-secondary" disabled={busyId === skill.id} onClick={() => void requestVerification(skill.id, "static")}>{skill.verificationStatus === "unverified" ? "정적 검사" : "정적 재검사"}</button>

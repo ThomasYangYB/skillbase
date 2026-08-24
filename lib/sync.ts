@@ -445,12 +445,14 @@ async function ensureSchema(db: D1Database) {
     db.prepare("CREATE TABLE IF NOT EXISTS skills (id TEXT PRIMARY KEY, source_id TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, region TEXT NOT NULL, source TEXT NOT NULL, source_url TEXT NOT NULL, source_type TEXT NOT NULL, compatibility_json TEXT NOT NULL DEFAULT '[]', tags_json TEXT NOT NULL DEFAULT '[]', install TEXT NOT NULL, prompt TEXT NOT NULL, app_url TEXT NOT NULL, risk TEXT NOT NULL, trust TEXT NOT NULL, license TEXT, content_hash TEXT NOT NULL, discovered_via TEXT NOT NULL, source_updated_at TEXT, last_seen_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', approval_status TEXT NOT NULL DEFAULT 'review', approval_updated_at TEXT, approved_by TEXT, published_at TEXT, verification_status TEXT NOT NULL DEFAULT 'unverified', verification_updated_at TEXT, verification_summary TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS sync_sources (id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, url TEXT NOT NULL, region TEXT NOT NULL, source_type TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, last_synced_at TEXT, last_error TEXT)"),
     db.prepare("CREATE TABLE IF NOT EXISTS sync_runs (id TEXT PRIMARY KEY, started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL, sources_scanned INTEGER NOT NULL DEFAULT 0, candidates_seen INTEGER NOT NULL DEFAULT 0, accepted INTEGER NOT NULL DEFAULT 0, rejected INTEGER NOT NULL DEFAULT 0, error_summary TEXT)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS skill_feedback (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, type TEXT NOT NULL, message TEXT, actor_id TEXT, created_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS skill_review_events (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, action TEXT NOT NULL, from_status TEXT, to_status TEXT NOT NULL, actor_id TEXT NOT NULL, actor_email TEXT, note TEXT, created_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS skill_verification_jobs (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, mode TEXT NOT NULL, status TEXT NOT NULL, requested_by TEXT NOT NULL, requested_email TEXT, source_hash TEXT NOT NULL, verifier_version TEXT NOT NULL, summary TEXT, findings_json TEXT NOT NULL DEFAULT '[]', verification_method TEXT, duration_ms INTEGER, external_job_id TEXT, created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skills_status_category ON skills(status, category)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skills_region ON skills(region)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skills_last_seen ON skills(last_seen_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_review_events_skill ON skill_review_events(skill_id, created_at)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_feedback_skill ON skill_feedback(skill_id, created_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_verification_jobs_skill_status ON skill_verification_jobs(skill_id, status, created_at)"),
   ]);
 
@@ -715,11 +717,12 @@ export async function getStoredSkillRecord(db: D1Database, skillId: string) {
 
 export async function getSyncStatus(db: D1Database) {
   await ensureSchema(db);
-  const [run, sources, active, review] = await Promise.all([
+  const [run, sources, active, review, stale] = await Promise.all([
     db.prepare("SELECT * FROM sync_runs ORDER BY started_at DESC LIMIT 1").first<Record<string, unknown>>(),
     db.prepare("SELECT id, name, kind, url, region, source_type, enabled, last_synced_at, last_error FROM sync_sources ORDER BY name ASC").all<Record<string, unknown>>(),
     db.prepare("SELECT COUNT(*) AS count FROM skills WHERE status = 'active' AND approval_status = 'published'").first<{ count: number }>(),
     db.prepare("SELECT COUNT(*) AS count FROM skills WHERE status = 'active' AND approval_status = 'review'").first<{ count: number }>(),
+    db.prepare("SELECT COUNT(*) AS count FROM skills WHERE status = 'stale'").first<{ count: number }>(),
   ]);
-  return { activeSkills: Number(active?.count ?? 0), pendingReviews: Number(review?.count ?? 0), latestRun: run, sources: sources.results };
+  return { activeSkills: Number(active?.count ?? 0), pendingReviews: Number(review?.count ?? 0), staleSkills: Number(stale?.count ?? 0), latestRun: run, sources: sources.results };
 }

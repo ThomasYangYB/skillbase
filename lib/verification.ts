@@ -210,6 +210,10 @@ export async function requestSandboxVerification(env: VerificationEnv, skillId: 
   const createdAt = now();
   const jobId = crypto.randomUUID();
   const sourceHash = String(skill.content_hash);
+  const existing = await db.prepare("SELECT id FROM skill_verification_jobs WHERE skill_id = ? AND source_hash = ? AND mode = 'sandbox' AND status IN ('queued', 'running') ORDER BY created_at DESC LIMIT 1").bind(skillId, sourceHash).first<{ id: string }>();
+  if (existing) {
+    return { jobId: existing.id, mode: "sandbox" as const, status: "unverified" as const, jobStatus: "queued" as const, summary: "같은 원본에 대한 격리 검증 작업이 이미 대기 중입니다.", findings: [] as VerificationFinding[] };
+  }
   await db.prepare("INSERT INTO skill_verification_jobs (id, skill_id, mode, status, requested_by, requested_email, source_hash, verifier_version, created_at) VALUES (?, ?, 'sandbox', 'queued', ?, ?, ?, ?, ?)").bind(jobId, skillId, actor.id, actor.email ?? null, sourceHash, SANDBOX_VERIFIER_VERSION, createdAt).run();
   if (!env.SKILLBASE_SANDBOX_URL) {
     const summary = "Cloudflare Sandbox 어댑터가 연결되지 않았습니다. 정적 검사 결과만 사용하세요.";
@@ -275,6 +279,8 @@ export async function getVerificationMetrics(db: D1Database, windowDays = 30) {
   const durations = jobs.filter((row) => row.duration_ms != null).map((row) => Number(row.duration_ms)).filter((value) => Number.isFinite(value) && value >= 0);
   const count = (predicate: (row: Record<string, unknown>) => boolean) => jobs.filter(predicate).length;
   const total = jobs.length;
+  const sandboxTotal = count((row) => row.mode === "sandbox");
+  const fallback = count((row) => row.verification_method === "integrity_fallback");
   return {
     windowDays: safeDays,
     total,
@@ -282,9 +288,9 @@ export async function getVerificationMetrics(db: D1Database, windowDays = 30) {
     failed: count((row) => row.status === "failed" || row.status === "blocked"),
     queued: count((row) => row.status === "queued" || row.status === "running"),
     officialCli: count((row) => row.verification_method === "official_cli"),
-    fallback: count((row) => row.verification_method === "integrity_fallback"),
+    fallback,
     static: count((row) => row.mode === "static"),
     averageDurationMs: durations.length ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length) : null,
-    fallbackRate: total ? Math.round((count((row) => row.verification_method === "integrity_fallback") / total) * 1000) / 10 : 0,
+    fallbackRate: sandboxTotal ? Math.round((fallback / sandboxTotal) * 1000) / 10 : 0,
   };
 }

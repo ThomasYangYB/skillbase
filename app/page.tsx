@@ -407,6 +407,9 @@ export default function Home() {
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [copied, setCopied] = useState(false);
   const [verified, setVerified] = useState(false);
+  const [reporting, setReporting] = useState(false);
+  const [reportMessage, setReportMessage] = useState("");
+  const [feedbackStatus, setFeedbackStatus] = useState("");
   const [syncSummary, setSyncSummary] = useState<{ activeSkills: number; pendingReviews: number; latestRun?: { status?: string; finished_at?: string | null }; sources: unknown[] } | null>(null);
 
   useEffect(() => {
@@ -468,6 +471,9 @@ export default function Home() {
     setSelectedSkill(skill);
     setCopied(false);
     setVerified(false);
+    setReporting(false);
+    setReportMessage("");
+    setFeedbackStatus("");
   };
 
   const copyPrompt = async () => {
@@ -485,6 +491,27 @@ export default function Home() {
     if (!selectedSkill) return;
     await copyPrompt();
     window.open(selectedSkill.appUrl, "_blank", "noopener,noreferrer");
+  };
+
+  const sendReport = async () => {
+    if (!selectedSkill || reportMessage.trim().length < 3) {
+      setFeedbackStatus("문제를 3자 이상 입력하세요.");
+      return;
+    }
+    setFeedbackStatus("전송 중...");
+    try {
+      const response = await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ skillId: selectedSkill.id, type: "report", message: reportMessage.trim() }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "신고를 전송하지 못했습니다.");
+      setFeedbackStatus("신고가 접수되었습니다. 운영자가 확인합니다.");
+      setReportMessage("");
+    } catch (error) {
+      setFeedbackStatus(error instanceof Error ? error.message : "신고를 전송하지 못했습니다.");
+    }
   };
 
   return (
@@ -651,13 +678,22 @@ export default function Home() {
               <div className={`skill-logo ${selectedSkill.accent}`}>{selectedSkill.monogram}</div>
               <div><p className="section-kicker">{selectedSkill.category}</p><h2 id="skill-modal-title">{selectedSkill.name}</h2><p>{selectedSkill.description}</p></div>
             </div>
-            <div className="modal-status"><span><CheckIcon /> {selectedSkill.trust}</span><span><CheckIcon /> 권한 검토 {selectedSkill.risk}</span><span>{selectedSkill.region} · {selectedSkill.sourceType}</span></div>
+            <div className="modal-status"><span><CheckIcon /> {selectedSkill.trust}</span><span><CheckIcon /> 권한 검토 {selectedSkill.risk}</span><span>{selectedSkill.region} · {selectedSkill.sourceType}</span><span>라이선스 {selectedSkill.license ?? "미상"}</span></div>
             <p className="modal-source">출처: <a href={selectedSkill.sourceUrl} target="_blank" rel="noreferrer">{selectedSkill.source}</a> ↗</p>
             <div className="modal-columns">
               <div className="modal-block"><div className="block-title"><span>01</span><h3>설치</h3></div><p>원본 출처의 설치 경로입니다. 실제 실행 권한과 파일 변경 내용을 확인한 뒤 설치하세요.</p><div className="code-box"><code>{selectedSkill.install}</code><button onClick={() => navigator.clipboard?.writeText(selectedSkill.install)} aria-label="설치 명령어 복사">복사</button></div><button className="verify-button" onClick={() => setVerified(true)}>{verified ? "내 환경 확인 표시됨 ✓" : "설치 후 확인 표시"}</button></div>
               <div className="modal-block"><div className="block-title"><span>02</span><h3>프롬프트 실행</h3></div><p>입력값을 채운 뒤 프롬프트를 복사하거나 지원 앱에서 바로 시작하세요.</p><div className="prompt-box"><textarea defaultValue={selectedSkill.prompt} aria-label="실행할 프롬프트" /></div><div className="prompt-actions"><button className="secondary-button" onClick={copyPrompt}>{copied ? "복사 완료 ✓" : "프롬프트 복사"}</button><button className="primary-button" onClick={copyAndOpen}>복사 후 앱 열기 ↗</button></div></div>
             </div>
             <p className="modal-footnote">자동 붙여넣기는 사용자의 클릭 후 클립보드에 복사하고 지원 앱을 엽니다. 실제 설치·권한 검증은 로컬 환경에서 확인하세요.</p>
+            <div className="feedback-box">
+              <button className="feedback-toggle" onClick={() => { setReporting((current) => !current); setFeedbackStatus(""); }}>
+                {reporting ? "신고 닫기" : "이 Skill에 문제 신고"}
+              </button>
+              {reporting && <div className="feedback-form">
+                <textarea value={reportMessage} onChange={(event) => setReportMessage(event.target.value)} maxLength={1000} placeholder="설치 경로, 원본 링크, 권한 설명 중 어떤 부분이 문제인가요?" aria-label="Skill 문제 신고 내용" />
+                <div className="feedback-actions"><button className="primary-button" onClick={() => void sendReport()}>신고 보내기</button>{feedbackStatus && <span>{feedbackStatus}</span>}</div>
+              </div>}
+            </div>
           </section>
         </div>
       )}
