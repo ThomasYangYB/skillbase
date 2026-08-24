@@ -40,11 +40,14 @@ test("keeps the adapter fail-closed and network policy visible in source", async
   assert.match(source, /allowedHosts/);
   assert.match(source, /npmjs\.org/);
   assert.match(source, /VERIFICATION_QUEUE/);
+  assert.match(source, /VerificationResultStore/);
+  assert.match(source, /url\.pathname === "\/result"/);
   assert.match(source, /asyncVerification: true/);
   assert.match(source, /SANDBOX_ADAPTER_TOKEN/);
   assert.match(source, /sandbox\.destroy\(\)/);
   assert.match(policySource, /SKILLS_CLI_VERSION = "1\.5\.23"/);
   assert.match(policySource, /--offline/);
+  assert.match(policySource, /node_modules\/\.bin\/skills/);
   assert.match(dockerfile, /skills@\$\{SKILLS_CLI_VERSION\}/);
   assert.match(wrangler, /skillbase-sandbox-verifications/);
 });

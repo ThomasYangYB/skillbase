@@ -71,7 +71,7 @@ export function parseVerifyRequest(value: unknown): VerifyRequest | null {
 }
 
 export function buildInstallCommand(parsed: ParsedInstall) {
-  return `DO_NOT_TRACK=1 NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false PATH=/opt/skillbase-cli/node_modules/.bin:$PATH npx --offline --no-install skills add https://github.com/${parsed.repo} --skill ${parsed.skillName} --agent codex --yes --copy`;
+  return `DO_NOT_TRACK=1 NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false npx --offline --no-install /opt/skillbase-cli/node_modules/.bin/skills add https://github.com/${parsed.repo} --skill ${parsed.skillName} --agent codex --yes --copy`;
 }
 
 export function rawSourceUrl(sourceUrl: string) {
