@@ -27,6 +27,23 @@
       "tag": "v1"
     }
   ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "VERIFICATION_QUEUE",
+        "queue": "skillbase-sandbox-verifications"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "skillbase-sandbox-verifications",
+        "max_batch_size": 1,
+        "max_batch_timeout": 5,
+        "max_retries": 2,
+        "dead_letter_queue": "skillbase-sandbox-verifications-dlq"
+      }
+    ]
+  },
   "vars": {
     "SKILLBASE_CALLBACK_URL": "https://skillbase-ai-skills.syjd2025.chatgpt.site/api/admin/verification/callback"
   }

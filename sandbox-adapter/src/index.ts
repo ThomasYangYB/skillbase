@@ -1,5 +1,5 @@
 import { ContainerProxy, getSandbox, Sandbox as CloudflareSandbox } from "@cloudflare/sandbox";
-import { buildInstallCommand, parseInstallCommand, parseVerifyRequest, rawSourceUrl, safeSandboxId, sourceRepository, trimOutput, type VerifyRequest } from "./policy";
+import { buildInstallCommand, parseInstallCommand, parseVerifyRequest, rawSourceUrl, safeSandboxId, SKILLS_CLI_VERSION, sourceRepository, trimOutput, type VerifyRequest } from "./policy";
 
 export { ContainerProxy };
 
@@ -8,6 +8,7 @@ type Env = {
   SANDBOX_ADAPTER_TOKEN?: string;
   SKILLBASE_CALLBACK_TOKEN?: string;
   SKILLBASE_CALLBACK_URL: string;
+  VERIFICATION_QUEUE: Queue<VerifyRequest>;
 };
 
 export class Sandbox extends CloudflareSandbox {
@@ -20,6 +21,10 @@ export class Sandbox extends CloudflareSandbox {
     "codeload.github.com",
     "objects.githubusercontent.com",
     "registry.npmjs.org",
+    "npmjs.org",
+    "*.npmjs.org",
+    "npmjs.com",
+    "*.npmjs.com",
     "www.npmjs.com",
     "skills.sh",
     "*.skills.sh",
@@ -35,7 +40,7 @@ function callbackAllowed(request: VerifyRequest, env: Env) {
   return !request.callbackUrl || request.callbackUrl === env.SKILLBASE_CALLBACK_URL;
 }
 
-async function notifyCatalog(request: VerifyRequest, env: Env, status: "passed" | "failed", verificationMethod: "official_cli" | "integrity_fallback", summary: string, findings: unknown[]) {
+async function notifyCatalog(request: VerifyRequest, env: Env, status: "passed" | "failed", verificationMethod: "official_cli" | "integrity_fallback" | undefined, summary: string, findings: unknown[]) {
   if (!request.callbackUrl || !env.SKILLBASE_CALLBACK_TOKEN) return null;
   const response = await fetch(request.callbackUrl, {
     method: "POST",
@@ -43,8 +48,9 @@ async function notifyCatalog(request: VerifyRequest, env: Env, status: "passed" 
       "content-type": "application/json",
       authorization: `Bearer ${env.SKILLBASE_CALLBACK_TOKEN}`,
     },
-    body: JSON.stringify({ jobId: request.jobId, sourceHash: request.sourceHash, status, verificationMethod, summary, findings }),
+      body: JSON.stringify({ jobId: request.jobId, sourceHash: request.sourceHash, status, ...(verificationMethod ? { verificationMethod } : {}), summary, findings }),
   });
+  console.log(JSON.stringify({ event: "verification-callback", jobId: safeSandboxId(request.jobId), status: response.status }));
   if (!response.ok) throw new Error(`카탈로그 callback이 ${response.status}로 실패했습니다.`);
   return response;
 }
@@ -63,7 +69,7 @@ async function verify(request: VerifyRequest, env: Env) {
     let primary: Awaited<ReturnType<typeof sandbox.exec>> | null = null;
     let primaryError: string | null = null;
     try {
-      primary = await sandbox.exec(command, { cwd: "/workspace", timeout: Math.min(request.constraints.timeoutMs, 15000) });
+      primary = await sandbox.exec(command, { cwd: "/workspace", timeout: Math.min(request.constraints.timeoutMs, 60000) });
     } catch (error) {
       primaryError = error instanceof Error ? error.message : "공식 CLI 실행이 중단되었습니다.";
     }
@@ -104,12 +110,26 @@ async function verify(request: VerifyRequest, env: Env) {
   }
 }
 
+async function processVerification(request: VerifyRequest, env: Env) {
+  let result: Awaited<ReturnType<typeof verify>>;
+  try {
+    result = await verify(request, env);
+  } catch (error) {
+    const summary = error instanceof Error ? error.message : "격리 설치 검증에 실패했습니다.";
+    await notifyCatalog(request, env, "failed", undefined, summary, [{ code: "sandbox-error", severity: "blocker", title: "격리 검증 실행 오류", detail: summary }]);
+    return;
+  }
+  console.log(JSON.stringify({ event: "verification-result", jobId: safeSandboxId(request.jobId), success: result.success, method: result.verificationMethod }));
+  await notifyCatalog(request, env, result.success ? "passed" : "failed", result.success ? result.verificationMethod : undefined, result.summary, result.findings);
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname === "/health" && request.method === "GET") return Response.json({ ok: true, service: "skillbase-sandbox-adapter" });
+    if (url.pathname === "/health" && request.method === "GET") return Response.json({ ok: true, service: "skillbase-sandbox-adapter", asyncVerification: true, skillsCliVersion: SKILLS_CLI_VERSION });
     if (url.pathname !== "/verify" || request.method !== "POST") return Response.json({ error: "Not found" }, { status: 404 });
     if (!env.SANDBOX_ADAPTER_TOKEN) return Response.json({ error: "Sandbox adapter secret이 설정되지 않았습니다." }, { status: 503 });
+    if (!env.VERIFICATION_QUEUE) return Response.json({ error: "검증 Queue가 설정되지 않았습니다." }, { status: 503 });
     if (request.headers.get("authorization") !== `Bearer ${env.SANDBOX_ADAPTER_TOKEN}`) return unauthorized();
     try {
       const raw = await request.text();
@@ -118,18 +138,25 @@ export default {
       const parsed = parseVerifyRequest(body);
       if (!parsed) return Response.json({ error: "허용되지 않은 검증 요청 형식입니다." }, { status: 400 });
       if (!callbackAllowed(parsed, env)) return Response.json({ error: "허용되지 않은 callback URL입니다." }, { status: 400 });
-      const result = await verify(parsed, env);
-      const status = result.success ? "passed" : "failed";
-      let callbackWarning: string | undefined;
-      try {
-        await notifyCatalog(parsed, env, status, result.verificationMethod, result.summary, result.findings);
-      } catch (callbackError) {
-        callbackWarning = callbackError instanceof Error ? callbackError.message : "카탈로그 callback을 완료하지 못했습니다.";
-      }
-      return Response.json({ externalJobId: result.externalJobId, status, verificationMethod: result.verificationMethod, summary: result.summary, findings: result.findings, callbackWarning });
+      await env.VERIFICATION_QUEUE.send(parsed);
+      return Response.json({ externalJobId: safeSandboxId(parsed.jobId), status: "queued", summary: "공식 CLI 검증 작업을 Queue에 등록했습니다." }, { status: 202 });
     } catch (error) {
       const summary = error instanceof Error ? error.message : "격리 설치 검증에 실패했습니다.";
-      return Response.json({ status: "failed", summary }, { status: 502 });
+      return Response.json({ status: "failed", summary }, { status: 503 });
+    }
+  },
+  async queue(batch: MessageBatch<VerifyRequest>, env: Env) {
+    console.log(JSON.stringify({ event: "verification-queue-received", messageCount: batch.messages.length }));
+    for (const message of batch.messages) {
+      try {
+        console.log(JSON.stringify({ event: "verification-queue-start", jobId: safeSandboxId(message.body.jobId) }));
+        await processVerification(message.body, env);
+        message.ack();
+        console.log(JSON.stringify({ event: "verification-queue-ack", jobId: safeSandboxId(message.body.jobId) }));
+      } catch {
+        console.log(JSON.stringify({ event: "verification-queue-retry", jobId: safeSandboxId(message.body.jobId) }));
+        message.retry();
+      }
     }
   },
 };

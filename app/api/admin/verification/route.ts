@@ -28,7 +28,7 @@ export async function POST(request: Request) {
     const result = body.mode === "static"
       ? await runStaticVerification(runtimeEnv, body.skillId, operator)
       : await requestSandboxVerification(runtimeEnv, body.skillId, operator, `${new URL(request.url).origin}/api/admin/verification/callback`);
-    return Response.json(result, { status: result.jobStatus === "unavailable" ? 202 : 200 });
+    return Response.json(result, { status: result.jobStatus === "unavailable" || result.jobStatus === "queued" ? 202 : 200 });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "검증을 실행하지 못했습니다." }, { status: 409 });
   }

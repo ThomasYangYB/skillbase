@@ -18,6 +18,8 @@ export type ParsedInstall = {
   skillName: string;
 };
 
+export const SKILLS_CLI_VERSION = "1.5.23";
+
 const safeIdPattern = /^[A-Za-z0-9:_./-]{1,240}$/;
 const skillNamePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const hashPattern = /^[a-f0-9]{64}$/i;
@@ -69,11 +71,11 @@ export function parseVerifyRequest(value: unknown): VerifyRequest | null {
 }
 
 export function buildInstallCommand(parsed: ParsedInstall) {
-  return `DO_NOT_TRACK=1 npx --yes skills add https://github.com/${parsed.repo} --skill ${parsed.skillName} --agent codex --yes --copy`;
+  return `DO_NOT_TRACK=1 NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false PATH=/opt/skillbase-cli/node_modules/.bin:$PATH npx --offline --no-install skills add https://github.com/${parsed.repo} --skill ${parsed.skillName} --agent codex --yes --copy`;
 }
 
 export function rawSourceUrl(sourceUrl: string) {
-  const match = sourceUrl.match(/^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/blob\/([A-Za-z0-9._\/-]+)$/);
+  const match = sourceUrl.match(/^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/blob\/([A-Za-z0-9._/-]+)$/);
   if (!match || !match[2].toLowerCase().endsWith("/skill.md")) return null;
   return `https://raw.githubusercontent.com/${match[1]}/${match[2]}`;
 }

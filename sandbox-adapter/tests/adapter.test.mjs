@@ -33,8 +33,18 @@ test("rejects shell injection, mismatched repository, and unsafe constraints", (
 
 test("keeps the adapter fail-closed and network policy visible in source", async () => {
   const source = await readFile(new URL("../src/index.ts", import.meta.url), "utf8");
+  const policySource = await readFile(new URL("../src/policy.ts", import.meta.url), "utf8");
+  const dockerfile = await readFile(new URL("../Dockerfile", import.meta.url), "utf8");
+  const wrangler = await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8");
   assert.match(source, /enableInternet = false/);
   assert.match(source, /allowedHosts/);
+  assert.match(source, /npmjs\.org/);
+  assert.match(source, /VERIFICATION_QUEUE/);
+  assert.match(source, /asyncVerification: true/);
   assert.match(source, /SANDBOX_ADAPTER_TOKEN/);
   assert.match(source, /sandbox\.destroy\(\)/);
+  assert.match(policySource, /SKILLS_CLI_VERSION = "1\.5\.23"/);
+  assert.match(policySource, /--offline/);
+  assert.match(dockerfile, /skills@\$\{SKILLS_CLI_VERSION\}/);
+  assert.match(wrangler, /skillbase-sandbox-verifications/);
 });

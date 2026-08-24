@@ -74,7 +74,7 @@ test("keeps the scheduled Agent Skills collection pipeline configured", async ()
 });
 
 test("keeps the operator approval queue and publication gate configured", async () => {
-  const [schema, sync, route, operator, adminPage, migration, verification, callback, verificationMigration] = await Promise.all([
+  const [schema, sync, route, operator, adminPage, migration, verification, callback, verificationRoute, verificationMigration] = await Promise.all([
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/sync.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/admin/queue/route.ts", import.meta.url), "utf8"),
@@ -83,6 +83,7 @@ test("keeps the operator approval queue and publication gate configured", async 
     readFile(new URL("../drizzle/0002_supreme_zodiak.sql", import.meta.url), "utf8"),
     readFile(new URL("../lib/verification.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/admin/verification/callback/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/admin/verification/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0003_supreme_brood.sql", import.meta.url), "utf8"),
   ]);
 
@@ -103,5 +104,6 @@ test("keeps the operator approval queue and publication gate configured", async 
   assert.match(verification, /integrity_fallback/);
   assert.match(callback, /sourceHash/);
   assert.match(callback, /verificationMethod/);
+  assert.match(verificationRoute, /jobStatus === "queued"/);
   assert.match(verificationMigration, /verification_status` = 'legacy'/);
 });
