@@ -35,6 +35,22 @@ type QueueItem = {
 };
 
 type Counts = Record<ApprovalStatus, number>;
+type QualityIssue = {
+  id: string;
+  skillId: string;
+  kind: string;
+  severity: string;
+  status: string;
+  message: string;
+  checkedAt: string;
+  skillName: string | null;
+  skillSource: string | null;
+  skillUrl: string | null;
+  skillApprovalStatus: ApprovalStatus | null;
+  canonicalId: string | null;
+  canonicalName: string | null;
+  canonicalSource: string | null;
+};
 type VerificationMetrics = {
   windowDays: number;
   total: number;
@@ -46,7 +62,7 @@ type VerificationMetrics = {
   static: number;
   averageDurationMs: number | null;
   fallbackRate: number;
-  quality?: { open: number; blockers: number; issues: Array<Record<string, unknown>> };
+  quality?: { open: number; blockers: number; issues: QualityIssue[] };
   usage?: { totalEvents: number; favorites: number; activeUsers: number; topSkills: Array<Record<string, unknown>> };
   alerts?: Array<{ id: string; severity: string; title: string; message: string; created_at: string }>;
 };
@@ -199,6 +215,7 @@ export default function AdminQueuePage() {
       if (!response.ok) throw new Error(payload.error ?? "승인 상태를 변경하지 못했습니다.");
       setNotice(`“${actionLabel[action]}” 처리했습니다.`);
       await loadQueue(tab);
+      await loadMetrics();
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "승인 상태를 변경하지 못했습니다.");
     } finally {
@@ -268,6 +285,20 @@ export default function AdminQueuePage() {
         {toolStatus && <p className="admin-notice">{toolStatus}</p>}
         {error && <div className="admin-error"><strong>접근 또는 처리 오류</strong><span>{error}</span></div>}
         {metrics?.alerts && metrics.alerts.length > 0 && <div className="admin-alert-list"><strong>미해결 운영 알림 {metrics.alerts.length}건</strong>{metrics.alerts.map((alert) => <div className="admin-alert" key={alert.id}><span><b>{alert.title}</b> · {alert.message}</span><button onClick={() => void resolveAlert(alert.id)}>확인 처리</button></div>)}</div>}
+        {metrics?.quality && metrics.quality.issues.length > 0 && <div className="admin-quality-list">
+          <div><strong>품질 검토 필요 {metrics.quality.open}건</strong><span>자동 삭제하지 않습니다. 대표 Skill을 확인한 뒤 중복 공개만 수동 해제하세요.</span></div>
+          {metrics.quality.issues.map((issue) => <div className="admin-quality-item" key={issue.id}>
+            <div className="admin-quality-copy">
+              <div><b>{issue.kind === "duplicate" ? "중복 Skill" : issue.kind === "broken_source" ? "깨진 원본 링크" : "라이선스 변경"}</b><span>{issue.skillName ?? issue.skillId}</span></div>
+              <p>{issue.kind === "duplicate" && issue.canonicalName ? `대표: ${issue.canonicalName}${issue.canonicalSource ? ` · ${issue.canonicalSource}` : ""}` : issue.message}</p>
+              {issue.skillSource && <small>출처: {issue.skillSource}</small>}
+            </div>
+            <div className="admin-quality-actions">
+              {issue.skillUrl && <a href={issue.skillUrl} target="_blank" rel="noreferrer">원본 보기 ↗</a>}
+              {issue.kind === "duplicate" && issue.skillApprovalStatus === "published" && <button className="action-danger" disabled={busyId === issue.skillId} onClick={() => void changeStatus(issue.skillId, "unpublish")}>중복 공개 해제</button>}
+            </div>
+          </div>)}
+        </div>}
         {loading ? (
           <div className="admin-empty">검토 큐를 불러오는 중입니다.</div>
         ) : items.length === 0 ? (

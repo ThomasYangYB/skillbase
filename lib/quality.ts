@@ -106,7 +106,48 @@ export async function getQualitySummary(db: D1Database) {
   const [open, blockers, recent] = await Promise.all([
     db.prepare("SELECT COUNT(*) AS count FROM skill_quality_issues WHERE status = 'open'").first<{ count: number }>(),
     db.prepare("SELECT COUNT(*) AS count FROM skill_quality_issues WHERE status = 'open' AND severity = 'blocker'").first<{ count: number }>(),
-    db.prepare("SELECT id, skill_id, kind, severity, status, message, checked_at FROM skill_quality_issues WHERE status = 'open' ORDER BY checked_at DESC LIMIT 50").all<Record<string, unknown>>(),
+    db.prepare("SELECT id, skill_id, kind, severity, status, message, details_json, checked_at FROM skill_quality_issues WHERE status = 'open' ORDER BY checked_at DESC LIMIT 50").all<Record<string, unknown>>(),
   ]);
-  return { open: Number(open?.count ?? 0), blockers: Number(blockers?.count ?? 0), issues: recent.results ?? [] };
+  const issues = recent.results ?? [];
+  const detailsByIssue = new Map<string, Record<string, unknown>>();
+  const referencedIds = new Set<string>();
+  for (const issue of issues) {
+    try {
+      const details = JSON.parse(String(issue.details_json ?? "{}")) as Record<string, unknown>;
+      detailsByIssue.set(String(issue.id), details);
+      if (typeof issue.skill_id === "string") referencedIds.add(issue.skill_id);
+      if (typeof details.canonicalId === "string") referencedIds.add(details.canonicalId);
+    } catch {
+      detailsByIssue.set(String(issue.id), {});
+    }
+  }
+  const skillRows = referencedIds.size
+    ? await db.prepare(`SELECT id, name, source, source_url, approval_status FROM skills WHERE id IN (${Array.from(referencedIds, () => "?").join(",")})`).bind(...referencedIds).all<Record<string, unknown>>()
+    : { results: [] };
+  const skillsById = new Map((skillRows.results ?? []).map((row) => [String(row.id), row]));
+  return {
+    open: Number(open?.count ?? 0),
+    blockers: Number(blockers?.count ?? 0),
+    issues: issues.map((issue) => {
+      const details = detailsByIssue.get(String(issue.id)) ?? {};
+      const skill = skillsById.get(String(issue.skill_id));
+      const canonical = typeof details.canonicalId === "string" ? skillsById.get(details.canonicalId) : null;
+      return {
+        id: String(issue.id),
+        skillId: String(issue.skill_id),
+        kind: String(issue.kind),
+        severity: String(issue.severity),
+        status: String(issue.status),
+        message: String(issue.message),
+        checkedAt: String(issue.checked_at),
+        skillName: skill?.name ? String(skill.name) : null,
+        skillSource: skill?.source ? String(skill.source) : null,
+        skillUrl: skill?.source_url ? String(skill.source_url) : null,
+        skillApprovalStatus: skill?.approval_status ? String(skill.approval_status) : null,
+        canonicalId: canonical?.id ? String(canonical.id) : null,
+        canonicalName: canonical?.name ? String(canonical.name) : null,
+        canonicalSource: canonical?.source ? String(canonical.source) : null,
+      };
+    }),
+  };
 }
