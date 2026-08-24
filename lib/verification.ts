@@ -153,7 +153,7 @@ export async function requestSandboxVerification(env: VerificationEnv, skillId: 
     const response = await fetch(env.SKILLBASE_SANDBOX_URL, {
       method: "POST",
       headers,
-      body: JSON.stringify({ jobId, skillId, sourceUrl: String(skill.source_url), sourceHash, install: String(skill.install), callbackUrl, constraints: { network: "deny-by-default", timeoutMs: 30000, filesystem: "ephemeral", secrets: "none" } }),
+      body: JSON.stringify({ jobId, skillId, sourceUrl: String(skill.source_url), sourceHash, install: String(skill.install), callbackUrl, constraints: { network: "deny-by-default", timeoutMs: 90000, filesystem: "ephemeral", secrets: "none" } }),
     });
     const payload = await response.json().catch(() => ({})) as { externalJobId?: string; status?: string; summary?: string; findings?: unknown[] };
     if (!response.ok) throw new Error(payload.summary ?? `Sandbox adapter returned ${response.status}`);

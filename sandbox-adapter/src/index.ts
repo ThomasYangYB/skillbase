@@ -53,7 +53,7 @@ async function verify(request: VerifyRequest, env: Env) {
   const sandbox = getSandbox(env.Sandbox, safeSandboxId(request.jobId), {
     enableDefaultSession: false,
     sleepAfter: "30s",
-    containerTimeouts: { instanceGetTimeoutMS: 30000, portReadyTimeoutMS: 90000 },
+    containerTimeouts: { instanceGetTimeoutMS: 90000, portReadyTimeoutMS: 120000 },
   });
   const command = buildInstallCommand(parsed);
   try {

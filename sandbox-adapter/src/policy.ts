@@ -61,7 +61,7 @@ export function parseVerifyRequest(value: unknown): VerifyRequest | null {
   if (!jobId || !safeIdPattern.test(jobId) || !skillId || !safeIdPattern.test(skillId) || !sourceUrl || !sourceHash || !hashPattern.test(sourceHash) || !install || !constraints || typeof constraints !== "object") return null;
   const constraintRecord = constraints as Record<string, unknown>;
   const timeoutMs = Number(constraintRecord.timeoutMs);
-  if (constraintRecord.network !== "deny-by-default" || constraintRecord.filesystem !== "ephemeral" || constraintRecord.secrets !== "none" || !Number.isFinite(timeoutMs) || timeoutMs < 1000 || timeoutMs > 30000) return null;
+  if (constraintRecord.network !== "deny-by-default" || constraintRecord.filesystem !== "ephemeral" || constraintRecord.secrets !== "none" || !Number.isFinite(timeoutMs) || timeoutMs < 1000 || timeoutMs > 90000) return null;
   const source = sourceRepository(sourceUrl);
   const parsedInstall = parseInstallCommand(install);
   if (!source || !parsedInstall || source.repo.toLowerCase() !== parsedInstall.repo.toLowerCase() || source.skillName !== parsedInstall.skillName) return null;
