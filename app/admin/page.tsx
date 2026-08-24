@@ -82,6 +82,7 @@ type SummaryMetrics = {
   failures: Array<{ id: string; name: string; error: string; updatedAt: string }>;
 };
 type SkillSubmission = { id: string; actor_email: string | null; name: string; source_url: string; source_type: string; category: string; description: string; install: string; prompt: string; created_at: string };
+type RestorePlan = { ready?: boolean; target?: string; execution?: string; tables?: Array<{ table: string; rows: number }>; warnings?: string[] };
 
 const tabs: Array<{ key: QueueTab; label: string }> = [
   { key: "review", label: "검토 필요" },
@@ -178,9 +179,10 @@ export default function AdminQueuePage() {
     setToolStatus("백업 복구 가능성을 확인하는 중...");
     try {
       const response = await fetch("/api/admin/backup-test", { cache: "no-store" });
-      const payload = await response.json() as { ok?: boolean; errors?: string[]; counts?: Record<string, number> };
+      const payload = await response.json() as { ok?: boolean; errors?: string[]; counts?: Record<string, number>; restorePlan?: RestorePlan };
       if (!response.ok || !payload.ok) throw new Error(payload.errors?.join(" | ") ?? "백업 복구 테스트에 실패했습니다.");
-      setToolStatus(`백업 복구 테스트 통과 · Skill ${payload.counts?.skills ?? 0}건`);
+      const planRows = payload.restorePlan?.tables?.reduce((sum, table) => sum + table.rows, 0) ?? 0;
+      setToolStatus(`백업 복구 리허설 통과 · ${planRows}개 행 · 실제 DB에는 쓰지 않음`);
     } catch (backupError) {
       setToolStatus(backupError instanceof Error ? backupError.message : "백업 복구 테스트에 실패했습니다.");
     }
@@ -206,9 +208,10 @@ export default function AdminQueuePage() {
     setToolStatus("선택한 백업 파일을 검사하는 중...");
     try {
       const response = await fetch("/api/admin/backup-test", { method: "POST", headers: { "content-type": "application/json" }, body: await file.text() });
-      const payload = await response.json() as { ok?: boolean; errors?: string[]; warnings?: string[]; counts?: Record<string, number> };
+      const payload = await response.json() as { ok?: boolean; errors?: string[]; warnings?: string[]; counts?: Record<string, number>; restorePlan?: RestorePlan };
       if (!response.ok || !payload.ok) throw new Error(payload.errors?.join(" | ") ?? "백업 파일을 복구할 수 없습니다.");
-      setToolStatus(`백업 파일 검사 통과 · Skill ${payload.counts?.skills ?? 0}건${payload.warnings?.length ? ` · 경고 ${payload.warnings.length}건` : ""}`);
+      const planRows = payload.restorePlan?.tables?.reduce((sum, table) => sum + table.rows, 0) ?? payload.counts?.skills ?? 0;
+      setToolStatus(`백업 복구 리허설 통과 · ${planRows}개 행 · 실제 DB에는 쓰지 않음${payload.warnings?.length ? ` · 경고 ${payload.warnings.length}건` : ""}`);
     } catch (backupError) {
       setToolStatus(backupError instanceof Error ? backupError.message : "백업 파일을 검사하지 못했습니다.");
     }

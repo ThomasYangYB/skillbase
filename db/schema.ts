@@ -1,4 +1,4 @@
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const skills = sqliteTable("skills", {
   id: text("id").primaryKey(),
@@ -192,4 +192,14 @@ export const skillSubmissions = sqliteTable("skill_submissions", {
 }, (table) => ({
   statusIdx: index("idx_skill_submissions_status_created").on(table.status, table.createdAt),
   actorIdx: index("idx_skill_submissions_actor_created").on(table.actorId, table.createdAt),
+}));
+
+export const requestRateLimits = sqliteTable("request_rate_limits", {
+  key: text("key").notNull(),
+  windowStart: integer("window_start").notNull(),
+  count: integer("count").notNull().default(0),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => ({
+  primaryKey: primaryKey({ columns: [table.key, table.windowStart] }),
+  windowIdx: index("idx_request_rate_limits_window").on(table.windowStart),
 }));

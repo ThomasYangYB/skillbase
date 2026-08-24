@@ -1,5 +1,6 @@
 import { listStoredSkills } from "../../../../lib/sync";
 import { runtimeEnv } from "../../../../lib/runtime-env";
+import { enforceD1RateLimit, rateLimitHeaders, requestNetworkIdentity } from "../../../../lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,14 @@ export function OPTIONS() {
 
 export async function GET(request: Request) {
   if (!runtimeEnv.DB) return Response.json({ error: "D1 is not configured" }, { status: 503, headers: headers() });
+  let rateLimit;
+  try {
+    rateLimit = await enforceD1RateLimit(runtimeEnv.DB, "public-api", await requestNetworkIdentity(request), 120, 3600);
+  } catch {
+    return Response.json({ error: "공개 API 호출 제한기를 초기화하지 못했습니다." }, { status: 503, headers: headers() });
+  }
+  const limitHeaders = rateLimitHeaders(rateLimit);
+  if (!rateLimit.allowed) return Response.json({ error: "공개 API는 한 시간에 120회까지 호출할 수 있습니다.", resetAt: rateLimit.resetAt }, { status: 429, headers: { ...headers(), ...limitHeaders } });
   const url = new URL(request.url);
   const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 50) || 50, 1), 100);
   const skills = await listStoredSkills(
@@ -33,5 +42,5 @@ export async function GET(request: Request) {
     limit,
     clean(url.searchParams.get("platform"), 40),
   );
-  return Response.json({ data: skills, meta: { count: skills.length, limit, generatedAt: new Date().toISOString() } }, { headers: headers() });
+  return Response.json({ data: skills, meta: { count: skills.length, limit, generatedAt: new Date().toISOString() } }, { headers: { ...headers(), ...limitHeaders } });
 }

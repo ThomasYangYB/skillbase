@@ -1,6 +1,7 @@
 import { getStoredSkillRecord } from "../../../lib/sync";
 import { runtimeEnv } from "../../../lib/runtime-env";
 import { recordOpsAlerts } from "../../../lib/alerts";
+import { enforceD1RateLimit, rateLimitHeaders } from "../../../lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -30,15 +31,15 @@ export async function POST(request: Request) {
     if (!skill || skill.status !== "active" || skill.approval_status !== "published") return Response.json({ error: "공개된 Skill만 피드백을 남길 수 있습니다." }, { status: 404 });
     const actorId = request.headers.get("oai-authenticated-user-id");
     const key = await rateKey(request, actorId);
-    const recent = await runtimeEnv.DB.prepare("SELECT COUNT(*) AS count FROM skill_feedback WHERE actor_id = ? AND created_at >= datetime('now', '-1 hour')").bind(key).first<{ count: number }>();
-    if (Number(recent?.count ?? 0) >= 5) return Response.json({ error: "피드백은 한 시간에 5건까지 보낼 수 있습니다." }, { status: 429, headers: { "retry-after": "3600" } });
+    const rateLimit = await enforceD1RateLimit(runtimeEnv.DB, "feedback", key, 5, 3600);
+    if (!rateLimit.allowed) return Response.json({ error: "피드백은 한 시간에 5건까지 보낼 수 있습니다." }, { status: 429, headers: rateLimitHeaders(rateLimit) });
     if (type === "report" && message) {
       const duplicate = await runtimeEnv.DB.prepare("SELECT id FROM skill_feedback WHERE skill_id = ? AND actor_id = ? AND type = 'report' AND message = ? AND created_at >= datetime('now', '-1 day') LIMIT 1").bind(skillId, key, message).first<{ id: string }>();
       if (duplicate) return Response.json({ error: "같은 신고가 이미 접수되었습니다." }, { status: 409 });
     }
     await runtimeEnv.DB.prepare("INSERT INTO skill_feedback (id, skill_id, type, message, actor_id, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), skillId, type, message, key, new Date().toISOString()).run();
     if (type === "report") await recordOpsAlerts(runtimeEnv, [{ kind: "security", severity: "warning", title: "사용자 Skill 신고 접수", message: `${skillId}에 대한 사용자 신고가 접수되었습니다.`, fingerprint: `feedback:report:${skillId}` }]);
-    return Response.json({ ok: true }, { status: 201 });
+    return Response.json({ ok: true }, { status: 201, headers: rateLimitHeaders(rateLimit) });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "피드백을 저장하지 못했습니다." }, { status: 400 });
   }

@@ -10,6 +10,7 @@ export type BackupSnapshot = {
   qualityIssues: Array<Record<string, unknown>>;
   usageEvents: Array<Record<string, unknown>>;
   favorites: Array<Record<string, unknown>>;
+  submissions?: Array<Record<string, unknown>>;
   sync: Record<string, unknown>;
 };
 
@@ -20,7 +21,7 @@ async function digest(value: string) {
 
 export async function createBackupSnapshot(db: D1Database): Promise<BackupSnapshot> {
   const sync = await getSyncStatus(db);
-  const [skills, reviewEvents, verificationJobs, feedback, alerts, qualityIssues, usageEvents, favorites] = await Promise.all([
+  const [skills, reviewEvents, verificationJobs, feedback, alerts, qualityIssues, usageEvents, favorites, submissions] = await Promise.all([
     db.prepare("SELECT * FROM skills ORDER BY updated_at DESC, name ASC").all<Record<string, unknown>>(),
     db.prepare("SELECT * FROM skill_review_events ORDER BY created_at DESC LIMIT 5000").all<Record<string, unknown>>(),
     db.prepare("SELECT * FROM skill_verification_jobs ORDER BY created_at DESC LIMIT 5000").all<Record<string, unknown>>(),
@@ -29,6 +30,7 @@ export async function createBackupSnapshot(db: D1Database): Promise<BackupSnapsh
     db.prepare("SELECT * FROM skill_quality_issues ORDER BY checked_at DESC LIMIT 5000").all<Record<string, unknown>>(),
     db.prepare("SELECT * FROM skill_usage_events ORDER BY created_at DESC LIMIT 20000").all<Record<string, unknown>>(),
     db.prepare("SELECT * FROM skill_favorites ORDER BY created_at DESC LIMIT 10000").all<Record<string, unknown>>(),
+    db.prepare("SELECT * FROM skill_submissions ORDER BY created_at DESC LIMIT 10000").all<Record<string, unknown>>(),
   ]);
   return {
     exportedAt: new Date().toISOString(),
@@ -40,7 +42,50 @@ export async function createBackupSnapshot(db: D1Database): Promise<BackupSnapsh
     qualityIssues: qualityIssues.results ?? [],
     usageEvents: usageEvents.results ?? [],
     favorites: favorites.results ?? [],
+    submissions: submissions.results ?? [],
     sync: sync as unknown as Record<string, unknown>,
+  };
+}
+
+function restoreRows(value: unknown) {
+  return Array.isArray(value) ? value.filter((row): row is Record<string, unknown> => Boolean(row && typeof row === "object")) : [];
+}
+
+export function buildRestorePlan(snapshot: BackupSnapshot, contentHash: string | null, warnings: string[]) {
+  const tables = [
+    { key: "skills", table: "skills", order: 1, required: ["id", "source_url"] },
+    { key: "reviewEvents", table: "skill_review_events", order: 2, required: ["id", "skill_id"] },
+    { key: "verificationJobs", table: "skill_verification_jobs", order: 3, required: ["id", "skill_id"] },
+    { key: "feedback", table: "skill_feedback", order: 4, required: ["id", "skill_id"] },
+    { key: "alerts", table: "ops_alerts", order: 5, required: ["id"] },
+    { key: "qualityIssues", table: "skill_quality_issues", order: 6, required: ["id", "skill_id"] },
+    { key: "usageEvents", table: "skill_usage_events", order: 7, required: ["id", "skill_id"] },
+    { key: "favorites", table: "skill_favorites", order: 8, required: ["id", "skill_id", "actor_id"] },
+    { key: "submissions", table: "skill_submissions", order: 9, required: ["id", "name", "source_url"] },
+  ] as const;
+  const skillIds = new Set(restoreRows(snapshot.skills).map((row) => String(row.id ?? "")).filter(Boolean));
+  const relationWarnings = [
+    ["reviewEvents", restoreRows(snapshot.reviewEvents)],
+    ["verificationJobs", restoreRows(snapshot.verificationJobs)],
+    ["feedback", restoreRows(snapshot.feedback)],
+    ["qualityIssues", restoreRows(snapshot.qualityIssues)],
+    ["usageEvents", restoreRows(snapshot.usageEvents)],
+    ["favorites", restoreRows(snapshot.favorites)],
+  ].flatMap(([name, rows]) => {
+    const orphaned = (rows as Record<string, unknown>[]).filter((row) => !skillIds.has(String(row.skill_id ?? ""))).length;
+    return orphaned > 0 ? [`${name}에서 연결된 Skill이 없는 행 ${orphaned}건`] : [];
+  });
+  const fieldWarnings = tables.flatMap((entry) => restoreRows(snapshot[entry.key]).flatMap((row) => entry.required.some((field) => !String(row[field] ?? "")) ? [`${entry.table}에 필수 필드가 없는 행이 있습니다.`] : []));
+  const allWarnings = [...new Set([...warnings, ...relationWarnings, ...fieldWarnings])];
+  return {
+    ready: allWarnings.length === 0,
+    execution: "dry-run",
+    target: "격리된 staging D1에서 실행할 복구 계획",
+    destructive: false,
+    checksum: contentHash,
+    order: tables.map((entry) => entry.table),
+    tables: tables.map((entry) => ({ table: entry.table, order: entry.order, rows: restoreRows(snapshot[entry.key]).length, required: entry.required, conflictPolicy: "기존 행을 덮어쓰지 않는 사전 점검" })),
+    warnings: allWarnings,
   };
 }
 
@@ -52,7 +97,9 @@ export async function validateBackupSnapshot(snapshot: unknown) {
   for (const key of ["exportedAt", "skills", "reviewEvents", "verificationJobs", "feedback", "alerts", "qualityIssues", "usageEvents", "favorites", "sync"] as const) {
     if (!(key in value)) errors.push(`${key} 필드가 없습니다.`);
   }
-  const arrays: Array<[string, unknown]> = [["skills", value.skills], ["reviewEvents", value.reviewEvents], ["verificationJobs", value.verificationJobs], ["feedback", value.feedback], ["alerts", value.alerts], ["qualityIssues", value.qualityIssues], ["usageEvents", value.usageEvents], ["favorites", value.favorites]];
+  if (!("submissions" in value)) warnings.push("이전 백업 포맷이라 사용자 제출 데이터가 없습니다.");
+  else if (!Array.isArray(value.submissions)) errors.push("submissions 배열이 아닙니다.");
+  const arrays: Array<[string, unknown]> = [["skills", value.skills], ["reviewEvents", value.reviewEvents], ["verificationJobs", value.verificationJobs], ["feedback", value.feedback], ["alerts", value.alerts], ["qualityIssues", value.qualityIssues], ["usageEvents", value.usageEvents], ["favorites", value.favorites], ["submissions", value.submissions ?? []]];
   for (const [name, entries] of arrays) if (!Array.isArray(entries)) errors.push(`${name} 배열이 아닙니다.`);
   const skills = Array.isArray(value.skills) ? value.skills : [];
   const ids = skills.map((row) => typeof row === "object" && row ? String((row as Record<string, unknown>).id ?? "") : "");
@@ -70,6 +117,20 @@ export async function validateBackupSnapshot(snapshot: unknown) {
   } catch {
     errors.push("백업 JSON을 안정적으로 직렬화할 수 없습니다.");
   }
+  const contentHash = serialized ? await digest(serialized) : null;
+  const normalized = {
+    exportedAt: String(value.exportedAt ?? ""),
+    skills: Array.isArray(value.skills) ? value.skills as Array<Record<string, unknown>> : [],
+    reviewEvents: Array.isArray(value.reviewEvents) ? value.reviewEvents as Array<Record<string, unknown>> : [],
+    verificationJobs: Array.isArray(value.verificationJobs) ? value.verificationJobs as Array<Record<string, unknown>> : [],
+    feedback: Array.isArray(value.feedback) ? value.feedback as Array<Record<string, unknown>> : [],
+    alerts: Array.isArray(value.alerts) ? value.alerts as Array<Record<string, unknown>> : [],
+    qualityIssues: Array.isArray(value.qualityIssues) ? value.qualityIssues as Array<Record<string, unknown>> : [],
+    usageEvents: Array.isArray(value.usageEvents) ? value.usageEvents as Array<Record<string, unknown>> : [],
+    favorites: Array.isArray(value.favorites) ? value.favorites as Array<Record<string, unknown>> : [],
+    submissions: Array.isArray(value.submissions) ? value.submissions as Array<Record<string, unknown>> : [],
+    sync: value.sync && typeof value.sync === "object" ? value.sync as Record<string, unknown> : {},
+  } satisfies BackupSnapshot;
   return {
     ok: errors.length === 0,
     errors,
@@ -83,7 +144,9 @@ export async function validateBackupSnapshot(snapshot: unknown) {
       qualityIssues: Array.isArray(value.qualityIssues) ? value.qualityIssues.length : 0,
       usageEvents: Array.isArray(value.usageEvents) ? value.usageEvents.length : 0,
       favorites: Array.isArray(value.favorites) ? value.favorites.length : 0,
+      submissions: Array.isArray(value.submissions) ? value.submissions.length : 0,
     },
-    contentHash: serialized ? await digest(serialized) : null,
+    contentHash,
+    restorePlan: buildRestorePlan(normalized, contentHash, warnings),
   };
 }

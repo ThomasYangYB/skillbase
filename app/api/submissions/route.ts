@@ -1,5 +1,6 @@
 import { getRequestActor } from "../../../lib/user";
 import { runtimeEnv } from "../../../lib/runtime-env";
+import { enforceD1RateLimit, rateLimitHeaders } from "../../../lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -37,12 +38,12 @@ export async function POST(request: Request) {
     try { parsedUrl = new URL(sourceUrl); } catch { return Response.json({ error: "원본 URL 형식이 올바르지 않습니다." }, { status: 400 }); }
     if (parsedUrl.protocol !== "https:") return Response.json({ error: "HTTPS 원본 URL만 등록할 수 있습니다." }, { status: 400 });
     const actor = await actorKey(request);
-    const recent = await runtimeEnv.DB.prepare("SELECT COUNT(*) AS count FROM skill_submissions WHERE actor_id = ? AND created_at >= datetime('now', '-1 day')").bind(actor.id).first<{ count: number }>();
-    if (Number(recent?.count ?? 0) >= 3) return Response.json({ error: "제출은 하루에 3건까지 가능합니다." }, { status: 429, headers: { "retry-after": "86400" } });
+    const rateLimit = await enforceD1RateLimit(runtimeEnv.DB, "submissions", actor.id, 3, 86400);
+    if (!rateLimit.allowed) return Response.json({ error: "제출은 하루에 3건까지 가능합니다." }, { status: 429, headers: rateLimitHeaders(rateLimit) });
     const duplicate = await runtimeEnv.DB.prepare("SELECT id FROM skill_submissions WHERE actor_id = ? AND source_url = ? AND status = 'pending' LIMIT 1").bind(actor.id, sourceUrl).first<{ id: string }>();
     if (duplicate) return Response.json({ error: "같은 원본이 이미 검토 대기 중입니다." }, { status: 409 });
     await runtimeEnv.DB.prepare("INSERT INTO skill_submissions (id, actor_id, actor_email, name, source_url, source_type, category, description, install, prompt, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)").bind(crypto.randomUUID(), actor.id, actor.email, name, sourceUrl, sourceType, category, description, install, prompt, new Date().toISOString()).run();
-    return Response.json({ ok: true, status: "pending", message: "제출이 접수되었습니다. 운영자 검토 후 카탈로그에 등록됩니다." }, { status: 201 });
+    return Response.json({ ok: true, status: "pending", message: "제출이 접수되었습니다. 운영자 검토 후 카탈로그에 등록됩니다." }, { status: 201, headers: rateLimitHeaders(rateLimit) });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Skill 제출에 실패했습니다." }, { status: 400 });
   }

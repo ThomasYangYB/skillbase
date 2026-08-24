@@ -186,7 +186,7 @@ test("keeps the operator approval queue and publication gate configured", async 
   assert.match(qualityRoute, /runQualityChecks/);
   assert.match(usageRoute, /getUsageMetrics/);
   assert.match(favoritesRoute, /setFavorite/);
-  assert.match(feedbackRoute, /datetime\('now', '-1 hour'\)/);
+  assert.match(feedbackRoute, /datetime\('now', '-1 day'\)/);
   assert.match(qualityLib, /broken_source/);
   assert.match(qualityLib, /license_changed/);
   assert.match(usageLib, /skill_usage_events/);
@@ -194,4 +194,31 @@ test("keeps the operator approval queue and publication gate configured", async 
   assert.match(maintenanceWorkflow, /npm view skills version/);
   assert.match(dependabot, /sandbox-adapter/);
   assert.match(operationalMigration, /ops_alerts/);
+});
+
+test("keeps durable abuse protection and restore rehearsal configured", async () => {
+  const [rateLimit, publicApi, feedback, submissions, backup, backupRoute, schema, migration, operator, docs] = await Promise.all([
+    readFile(new URL("../lib/rate-limit.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/v1/skills/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/feedback/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/submissions/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/backup.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/admin/backup-test/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0010_request_rate_limits.sql", import.meta.url), "utf8"),
+    readFile(new URL("../lib/operator.ts", import.meta.url), "utf8"),
+    readFile(new URL("../docs/operations.md", import.meta.url), "utf8"),
+  ]);
+  assert.match(rateLimit, /request_rate_limits/);
+  assert.match(rateLimit, /x-ratelimit-remaining/);
+  assert.match(publicApi, /enforceD1RateLimit/);
+  assert.match(feedback, /enforceD1RateLimit/);
+  assert.match(submissions, /enforceD1RateLimit/);
+  assert.match(backup, /buildRestorePlan/);
+  assert.match(backup, /submissions/);
+  assert.match(backupRoute, /mode: "dry-run"/);
+  assert.match(schema, /requestRateLimits/);
+  assert.match(migration, /request_rate_limits/);
+  assert.match(operator, /sec-fetch-site/);
+  assert.match(docs, /staging D1/);
 });
