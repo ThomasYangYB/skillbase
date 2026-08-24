@@ -618,10 +618,6 @@ export default function Home() {
           <a href="/admin">운영자 큐</a>
           <a href="#submit">Skill 등록</a>
         </nav>
-        <div className="top-actions">
-          <button className="icon-button" aria-label="알림">♧</button>
-          <button className="avatar" aria-label="프로필">J</button>
-        </div>
       </header>
 
       <section className="hero" id="top">
@@ -638,7 +634,13 @@ export default function Home() {
               placeholder="무엇을 자동화하고 싶나요?"
               aria-label="Skill 검색"
             />
-            <kbd>⌘ K</kbd>
+            <button
+              type="button"
+              className="shortcut-hint"
+              aria-label="검색창에 포커스"
+              title="검색창에 포커스"
+              onClick={() => searchRef.current?.focus()}
+            >⌘ K</button>
           </div>
           <div className="popular-searches">
             <span>인기 검색</span>
@@ -678,7 +680,7 @@ export default function Home() {
 
       <section className="explore-layout" id="explore">
         <aside className="sidebar">
-          <div className="sidebar-heading"><span>카테고리</span><button aria-label="카테고리 설정">•••</button></div>
+          <div className="sidebar-heading"><span>카테고리</span></div>
           <div className="category-list">
             {categories.map((category, index) => (
               <button
@@ -742,7 +744,6 @@ export default function Home() {
                       <div className="title-line"><h3>{skill.name}</h3><span className={`region-badge region-${skill.region === "국내" ? "kr" : "global"}`}>{skill.region}</span></div>
                       <p>{skill.category}</p>
                     </div>
-                    <button className="more-button" aria-label={`${skill.name} 더보기`}>•••</button>
                   </div>
                   <p className="skill-description">{skill.description}</p>
                   <div className="tag-row">{skill.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
@@ -768,7 +769,7 @@ export default function Home() {
 
       <section className="submit-banner" id="submit">
         <div><span className="banner-icon">+</span><div><p className="section-kicker">BUILD THE LIBRARY</p><h2>직접 만든 Skill도 등록하세요.</h2></div></div>
-        <button>등록 시작하기 <span>↗</span></button>
+        <span className="submit-coming-soon">제출 기능 준비 중</span>
       </section>
 
       <footer className="footer"><Link className="brand" href="/" aria-label="skillbase 홈"><span className="brand-mark">s<span>·</span></span><span>skillbase</span></Link><span>AI Skills를 더 안전하고 쉽게.</span><span>© 2026 skillbase</span></footer>
