@@ -293,14 +293,22 @@ export async function getVerificationMetrics(db: D1Database, windowDays = 30) {
   const count = (predicate: (row: Record<string, unknown>) => boolean) => jobs.filter(predicate).length;
   const total = jobs.length;
   const sandboxTotal = count((row) => row.mode === "sandbox");
-  const fallback = count((row) => row.verification_method === "integrity_fallback");
+  const method = (row: Record<string, unknown>) => {
+    if (row.verification_method === "official_cli" || row.verification_method === "integrity_fallback") return row.verification_method;
+    if (row.mode !== "sandbox" || row.status !== "passed") return null;
+    const summary = String(row.summary ?? "").toLowerCase();
+    if (/fallback|보조 경로|무결성/.test(summary)) return "integrity_fallback";
+    if (/official cli|공식 cli/.test(summary)) return "official_cli";
+    return null;
+  };
+  const fallback = count((row) => method(row) === "integrity_fallback");
   return {
     windowDays: safeDays,
     total,
     passed: count((row) => row.status === "passed"),
     failed: count((row) => row.status === "failed" || row.status === "blocked"),
     queued: count((row) => row.status === "queued" || row.status === "running"),
-    officialCli: count((row) => row.verification_method === "official_cli"),
+    officialCli: count((row) => method(row) === "official_cli"),
     fallback,
     static: count((row) => row.mode === "static"),
     averageDurationMs: durations.length ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length) : null,
