@@ -230,8 +230,8 @@ export default function AdminQueuePage() {
   return (
     <main className="admin-shell">
       <header className="admin-topbar">
-        <Link className="brand" href="/" aria-label="skillbase 홈"><span className="brand-mark">s<span>·</span></span><span>skillbase</span></Link>
-        <div className="admin-header-actions"><button className="admin-tool-button" onClick={() => void runBackupTest()}>복구 테스트</button><button className="admin-tool-button" onClick={() => backupInputRef.current?.click()}>백업 파일 검사</button><input ref={backupInputRef} type="file" accept="application/json,.json" hidden onChange={(event) => void testBackupFile(event)} /><button className="admin-tool-button" onClick={() => void runQualityCheck()}>품질 점검</button><a className="admin-export" href="/api/admin/export">데이터 백업 ↓</a><Link className="admin-back" href="/">카탈로그로 돌아가기 ↗</Link></div>
+        <Link prefetch={false} className="brand" href="/" aria-label="skillbase 홈"><span className="brand-mark">s<span>·</span></span><span>skillbase</span></Link>
+        <div className="admin-header-actions"><button className="admin-tool-button" onClick={() => void runBackupTest()}>복구 테스트</button><button className="admin-tool-button" onClick={() => backupInputRef.current?.click()}>백업 파일 검사</button><input ref={backupInputRef} type="file" accept="application/json,.json" hidden onChange={(event) => void testBackupFile(event)} /><button className="admin-tool-button" onClick={() => void runQualityCheck()}>품질 점검</button><a className="admin-export" href="/api/admin/export">데이터 백업 ↓</a><Link prefetch={false} className="admin-back" href="/">카탈로그로 돌아가기 ↗</Link></div>
       </header>
 
       <section className="admin-hero">
