@@ -36,6 +36,25 @@ export async function listFavoriteIds(db: D1Database, actorId: string) {
   return (result.results ?? []).map((row) => String(row.skill_id));
 }
 
+export async function listRecentSkillIds(db: D1Database, actorId: string, limit = 8) {
+  await ensureUsageSchema(db);
+  const safeLimit = Math.min(Math.max(Math.round(limit), 1), 20);
+  const result = await db.prepare("SELECT skill_id FROM skill_usage_events WHERE actor_id = ? AND event_type = 'view' GROUP BY skill_id ORDER BY MAX(created_at) DESC LIMIT ?").bind(actorId, safeLimit).all<{ skill_id: string }>();
+  return (result.results ?? []).map((row) => String(row.skill_id));
+}
+
+export async function getPersonalUsageMetrics(db: D1Database, actorId: string) {
+  await ensureUsageSchema(db);
+  const [events, favorites, recent] = await Promise.all([
+    db.prepare("SELECT event_type, COUNT(*) AS count FROM skill_usage_events WHERE actor_id = ? AND created_at >= datetime('now', '-30 days') GROUP BY event_type").bind(actorId).all<Record<string, unknown>>(),
+    db.prepare("SELECT COUNT(*) AS count FROM skill_favorites WHERE actor_id = ?").bind(actorId).first<{ count: number }>(),
+    listRecentSkillIds(db, actorId),
+  ]);
+  const eventCounts: Record<string, number> = {};
+  for (const row of events.results ?? []) eventCounts[String(row.event_type)] = Number(row.count ?? 0);
+  return { windowDays: 30, events: eventCounts, favorites: Number(favorites?.count ?? 0), recentSkillIds: recent };
+}
+
 export async function setFavorite(db: D1Database, skillId: string, actorId: string, active: boolean) {
   await ensureUsageSchema(db);
   const skill = await getStoredSkillRecord(db, skillId);

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 
 type Skill = {
   id: string;
@@ -394,6 +395,8 @@ const categoryNames = ["전체", "개발·IT", "디자인·크리에이티브", 
 const verificationFilters = ["전체", "검증됨", "fallback", "검토 필요"] as const;
 type VerificationFilter = typeof verificationFilters[number];
 type SortMode = "추천순" | "최신순" | "이름순";
+type CollectionMode = "전체" | "즐겨찾기" | "최근 본";
+type SourceTypeFilter = "전체" | "공식" | "커뮤니티" | "디렉터리";
 
 function CheckIcon() {
   return <span className="check-icon" aria-hidden="true">✓</span>;
@@ -404,15 +407,24 @@ export default function Home() {
   const [activeCategory, setActiveCategory] = useState("전체");
   const [activeRegion, setActiveRegion] = useState<"전체" | "국내" | "해외">("전체");
   const [activeVerification, setActiveVerification] = useState<VerificationFilter>("전체");
+  const [activeSourceType, setActiveSourceType] = useState<SourceTypeFilter>("전체");
+  const [activePlatform, setActivePlatform] = useState("전체");
+  const [collectionMode, setCollectionMode] = useState<CollectionMode>("전체");
   const [sortMode, setSortMode] = useState<SortMode>("추천순");
   const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [copied, setCopied] = useState(false);
   const [verified, setVerified] = useState(false);
+  const [promptDraft, setPromptDraft] = useState("");
+  const [promptInput, setPromptInput] = useState("");
+  const [executionStatus, setExecutionStatus] = useState("");
   const [reporting, setReporting] = useState(false);
   const [reportMessage, setReportMessage] = useState("");
   const [feedbackStatus, setFeedbackStatus] = useState("");
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
+  const [recentIds, setRecentIds] = useState<string[]>([]);
+  const [personalUsage, setPersonalUsage] = useState<{ events?: Record<string, number>; favorites?: number } | null>(null);
   const [favoriteStatus, setFavoriteStatus] = useState("");
   const [syncSummary, setSyncSummary] = useState<{ activeSkills: number; pendingReviews: number; latestRun?: { status?: string; finished_at?: string | null }; sources: unknown[] } | null>(null);
 
@@ -423,7 +435,7 @@ export default function Home() {
         const response = await fetch("/api/skills?limit=200", { cache: "no-store" });
         if (!response.ok) return;
         const payload = await response.json() as { skills?: Skill[] };
-        if (!cancelled && Array.isArray(payload.skills) && payload.skills.length > 0) setCatalogSkills(payload.skills);
+        if (!cancelled && Array.isArray(payload.skills) && payload.skills.length > 0) setCatalogSkills(payload.skills.map((skill) => ({ ...skill, monogram: skill.monogram || skill.name.slice(0, 3).toUpperCase(), accent: skill.accent || "violet", appUrl: skill.appUrl || "https://chatgpt.com/" })));
       } catch {
         // The curated fallback keeps the catalog useful when D1 has not synced yet.
       }
@@ -448,10 +460,23 @@ export default function Home() {
         // Favorites are optional and should not block catalog rendering.
       }
     };
+    const loadPersonalUsage = async () => {
+      try {
+        const response = await fetch("/api/usage/me", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json() as { recentSkillIds?: string[]; events?: Record<string, number>; favorites?: number };
+        if (!cancelled) { setRecentIds(Array.isArray(payload.recentSkillIds) ? payload.recentSkillIds : []); setPersonalUsage(payload); }
+      } catch {
+        // Personal usage is optional and should not block catalog rendering.
+      }
+    };
     void loadCatalog();
     void loadSyncSummary();
     void loadFavorites();
-    return () => { cancelled = true; };
+    void loadPersonalUsage();
+    const onShortcut = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); searchRef.current?.focus(); } };
+    window.addEventListener("keydown", onShortcut);
+    return () => { cancelled = true; window.removeEventListener("keydown", onShortcut); };
   }, []);
 
   const categories = categoryNames.map((label) => ({
@@ -460,32 +485,48 @@ export default function Home() {
   }));
   const platformCount = new Set(catalogSkills.flatMap((skill) => skill.compatibility)).size;
   const sourceCount = new Set(catalogSkills.map((skill) => skill.source)).size;
+  const platformFilters = useMemo(() => ["전체", ...new Set(catalogSkills.flatMap((skill) => skill.compatibility))], [catalogSkills]);
 
   const filteredSkills = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     const filtered = catalogSkills.filter((skill) => {
       const matchesCategory = activeCategory === "전체" || skill.category === activeCategory;
       const matchesRegion = activeRegion === "전체" || skill.region === activeRegion;
+      const matchesSourceType = activeSourceType === "전체" || skill.sourceType === activeSourceType;
+      const matchesPlatform = activePlatform === "전체" || skill.compatibility.includes(activePlatform);
+      const matchesCollection = collectionMode === "전체" || collectionMode === "즐겨찾기" && favoriteIds.includes(skill.id) || collectionMode === "최근 본" && recentIds.includes(skill.id);
       const verification = skill.verificationStatus ?? "legacy";
       const matchesVerification = activeVerification === "전체"
         || activeVerification === "검증됨" && ["sandbox_passed", "static_passed", "legacy"].includes(verification)
         || activeVerification === "fallback" && verification === "sandbox_fallback_passed"
         || activeVerification === "검토 필요" && ["unverified", "static_warning", "static_blocked", "sandbox_failed", "sandbox_unavailable"].includes(verification);
       const searchable = [skill.name, skill.category, skill.description, skill.source, skill.region, ...skill.tags, ...skill.compatibility].join(" ").toLowerCase();
-      return matchesCategory && matchesRegion && matchesVerification && (!normalizedQuery || searchable.includes(normalizedQuery));
+      return matchesCategory && matchesRegion && matchesSourceType && matchesPlatform && matchesCollection && matchesVerification && (!normalizedQuery || searchable.includes(normalizedQuery));
     });
     return [...filtered].sort((left, right) => {
       if (sortMode === "이름순") return left.name.localeCompare(right.name);
       if (sortMode === "최신순") return String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? ""));
-      const score = (skill: Skill) => (skill.favoriteCount ?? 0) * 3 + (skill.usageCount ?? 0) + (skill.verificationStatus === "sandbox_passed" ? 4 : skill.verificationStatus === "static_passed" ? 3 : skill.verificationStatus === "sandbox_fallback_passed" ? 2 : skill.trust === "원본 확인" ? 1 : 0);
+      const score = (skill: Skill) => (skill.favoriteCount ?? 0) * 3 + (skill.usageCount ?? 0) + (favoriteIds.includes(skill.id) ? 10 : 0) + (recentIds.includes(skill.id) ? 4 : 0) + (skill.verificationStatus === "sandbox_passed" ? 4 : skill.verificationStatus === "static_passed" ? 3 : skill.verificationStatus === "sandbox_fallback_passed" ? 2 : skill.trust === "원본 확인" ? 1 : 0);
       return score(right) - score(left) || left.name.localeCompare(right.name);
     });
-  }, [activeCategory, activeRegion, activeVerification, catalogSkills, query, sortMode]);
+  }, [activeCategory, activePlatform, activeRegion, activeSourceType, activeVerification, catalogSkills, collectionMode, favoriteIds, query, recentIds, sortMode]);
+
+  const recommendedSkills = useMemo(() => {
+    const preferredCategories = new Set(catalogSkills.filter((skill) => favoriteIds.includes(skill.id) || recentIds.includes(skill.id)).map((skill) => skill.category));
+    return [...catalogSkills].filter((skill) => !favoriteIds.includes(skill.id)).sort((left, right) => {
+      const leftScore = (preferredCategories.has(left.category) ? 8 : 0) + (left.usageCount ?? 0) + (left.verificationStatus === "sandbox_passed" ? 4 : 0);
+      const rightScore = (preferredCategories.has(right.category) ? 8 : 0) + (right.usageCount ?? 0) + (right.verificationStatus === "sandbox_passed" ? 4 : 0);
+      return rightScore - leftScore || left.name.localeCompare(right.name);
+    }).slice(0, 4);
+  }, [catalogSkills, favoriteIds, recentIds]);
 
   const openSkill = (skill: Skill) => {
     setSelectedSkill(skill);
     setCopied(false);
     setVerified(false);
+    setPromptDraft(skill.prompt);
+    setPromptInput("");
+    setExecutionStatus("");
     setReporting(false);
     setReportMessage("");
     setFeedbackStatus("");
@@ -504,7 +545,7 @@ export default function Home() {
   const copyPrompt = async () => {
     if (!selectedSkill) return;
     try {
-      await navigator.clipboard.writeText(selectedSkill.prompt);
+      await navigator.clipboard.writeText(promptDraft || selectedSkill.prompt);
     } catch {
       // Clipboard access can be blocked outside a secure context; the UI still confirms the intent.
     }
@@ -516,8 +557,15 @@ export default function Home() {
   const copyAndOpen = async () => {
     if (!selectedSkill) return;
     await copyPrompt();
+    if (!window.confirm("지원 앱을 열까요? 프롬프트는 복사되며 외부 앱에 자동 전송되지는 않습니다.")) return;
     void trackUsage(selectedSkill.id, "open");
     window.open(selectedSkill.appUrl, "_blank", "noopener,noreferrer");
+  };
+
+  const applyPromptInput = () => {
+    if (!selectedSkill) return;
+    setPromptDraft(selectedSkill.prompt.replace(/\{\{[^}]+\}\}/g, promptInput.trim() || "[여기에 작업 입력값을 넣으세요]"));
+    setExecutionStatus("입력값을 반영했습니다. 실행 전에 프롬프트를 확인하세요.");
   };
 
   const toggleFavorite = async () => {
@@ -559,13 +607,14 @@ export default function Home() {
   return (
     <main className="site-shell">
       <header className="topbar">
-        <a className="brand" href="#top" aria-label="skillbase 홈">
+        <Link className="brand" href="/" aria-label="skillbase 홈">
           <span className="brand-mark">s<span>·</span></span>
           <span>skillbase</span>
-        </a>
+        </Link>
         <nav className="main-nav" aria-label="주요 메뉴">
           <a className="active" href="#explore">탐색</a>
           <a href="#verification">수집 상태</a>
+          <a href="#library">내 보관함</a>
           <a href="/admin">운영자 큐</a>
           <a href="#submit">Skill 등록</a>
         </nav>
@@ -583,6 +632,7 @@ export default function Home() {
           <div className="hero-search">
             <span className="search-symbol" aria-hidden="true">⌕</span>
             <input
+              ref={searchRef}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="무엇을 자동화하고 싶나요?"
@@ -619,6 +669,13 @@ export default function Home() {
         <div className="trust-note"><CheckIcon /><span>{syncSummary?.pendingReviews ? `검토 대기 ${syncSummary.pendingReviews}개 · 공개 전 확인 필요` : syncSummary?.latestRun ? "최근 자동 수집 완료 · 공개 전 확인 완료" : "매일 자동 수집 예약 · 공개 전 확인"}</span></div>
       </section>
 
+      <section className="personal-hub" id="library">
+        <div><p className="section-kicker">YOUR LIBRARY</p><h2>내 보관함과 맞춤 추천</h2><p>즐겨찾기와 최근 본 Skill을 기준으로 탐색 흐름을 이어갑니다.</p><div className="personal-stats"><span><strong>{favoriteIds.length}</strong> 즐겨찾기</span><span><strong>{recentIds.length}</strong> 최근 본 Skill</span><span><strong>{personalUsage?.events?.copy ?? 0}</strong> 최근 복사</span></div></div>
+        <div className="personal-actions"><button className={collectionMode === "즐겨찾기" ? "selected" : ""} onClick={() => { setCollectionMode("즐겨찾기"); document.getElementById("explore")?.scrollIntoView({ behavior: "smooth" }); }}>즐겨찾기 보기</button><button className={collectionMode === "최근 본" ? "selected" : ""} onClick={() => { setCollectionMode("최근 본"); document.getElementById("explore")?.scrollIntoView({ behavior: "smooth" }); }}>최근 본 보기</button><button onClick={() => setCollectionMode("전체")}>전체 탐색</button></div>
+      </section>
+
+      {recommendedSkills.length > 0 && <section className="recommendation-section"><div className="recommendation-heading"><div><p className="section-kicker">RECOMMENDED NEXT</p><h2>다음에 볼 만한 Skill</h2></div><span>사용 기록과 검증 상태를 함께 반영합니다.</span></div><div className="recommendation-grid">{recommendedSkills.map((skill) => <a className="recommendation-card" href={`/skills/${skill.id}`} key={skill.id}><div className={`skill-logo ${skill.accent}`}>{skill.monogram}</div><div><strong>{skill.name}</strong><span>{skill.category}</span><p>{skill.description}</p></div><span className="recommendation-arrow">↗</span></a>)}</div></section>}
+
       <section className="explore-layout" id="explore">
         <aside className="sidebar">
           <div className="sidebar-heading"><span>카테고리</span><button aria-label="카테고리 설정">•••</button></div>
@@ -639,6 +696,9 @@ export default function Home() {
           <button className={`filter-link ${activeRegion === "전체" ? "selected" : ""}`} onClick={() => setActiveRegion("전체")}><span>✦</span> 전체 출처</button>
           <button className={`filter-link ${activeRegion === "국내" ? "selected" : ""}`} onClick={() => setActiveRegion("국내")}><span>⌁</span> 국내 출처만</button>
           <button className={`filter-link ${activeRegion === "해외" ? "selected" : ""}`} onClick={() => setActiveRegion("해외")}><span>◌</span> 해외 출처만</button>
+          <p className="sidebar-label sidebar-library-label">내 보관함</p>
+          <button className={`filter-link ${collectionMode === "즐겨찾기" ? "selected" : ""}`} onClick={() => setCollectionMode("즐겨찾기")}><span>★</span> 즐겨찾기만</button>
+          <button className={`filter-link ${collectionMode === "최근 본" ? "selected" : ""}`} onClick={() => setCollectionMode("최근 본")}><span>◷</span> 최근 본 항목</button>
           <div className="side-tip" id="sync">
             <span className="tip-icon">✳</span>
             <strong>자동 수집 파이프라인</strong>
@@ -666,6 +726,7 @@ export default function Home() {
             </div>
           </div>
 
+          <div className="catalog-filters" aria-label="Skill 필터"><span>출처 유형</span>{(["전체", "공식", "커뮤니티", "디렉터리"] as SourceTypeFilter[]).map((filter) => <button key={filter} className={activeSourceType === filter ? "selected" : ""} onClick={() => setActiveSourceType(filter)}>{filter}</button>)}<label className="filter-select-label" htmlFor="platform-filter">호환</label><select id="platform-filter" className="sort-select" value={activePlatform} onChange={(event) => setActivePlatform(event.target.value)} aria-label="호환 플랫폼"><option value="전체">모든 플랫폼</option>{platformFilters.filter((platform) => platform !== "전체").map((platform) => <option value={platform} key={platform}>{platform}</option>)}</select></div>
           <div className="catalog-filters" aria-label="검증 상태 필터">
             <span>검증 상태</span>
             {verificationFilters.map((filter) => <button key={filter} className={activeVerification === filter ? "selected" : ""} onClick={() => setActiveVerification(filter)}>{filter}</button>)}
@@ -692,7 +753,7 @@ export default function Home() {
                   </div>
                   <div className="card-footer">
                     <span className={`risk risk-${skill.risk === "낮음" ? "low" : "medium"}`}><span />권한 위험도 {skill.risk}</span>
-                    <button className="view-button" onClick={() => openSkill(skill)}>상세 보기 <span>↗</span></button>
+                    <div className="card-actions"><button className="view-button" onClick={() => openSkill(skill)}>빠른 보기</button><a className="detail-link" href={`/skills/${skill.id}`}>상세 페이지 ↗</a></div>
                   </div>
                 </article>
               ))}
@@ -701,7 +762,7 @@ export default function Home() {
             <div className="empty-state"><strong>아직 맞는 Skill을 찾지 못했어요.</strong><span>다른 검색어 또는 카테고리로 다시 찾아보세요.</span></div>
           )}
 
-          <div className="catalog-footer"><span>{syncSummary ? `${syncSummary.sources.length}개 출처를 주기적으로 확인합니다.` : "공개 원본 기준으로 계속 보강됩니다."}</span><button onClick={() => { setActiveCategory("전체"); setActiveRegion("전체"); setActiveVerification("전체"); setSortMode("추천순"); setQuery(""); }}>전체 Skill 보기 <span>→</span></button></div>
+          <div className="catalog-footer"><span>{syncSummary ? `${syncSummary.sources.length}개 출처를 주기적으로 확인합니다.` : "공개 원본 기준으로 계속 보강됩니다."}</span><button onClick={() => { setActiveCategory("전체"); setActiveRegion("전체"); setActiveSourceType("전체"); setActivePlatform("전체"); setActiveVerification("전체"); setCollectionMode("전체"); setSortMode("추천순"); setQuery(""); }}>전체 Skill 보기 <span>→</span></button></div>
         </div>
       </section>
 
@@ -710,7 +771,7 @@ export default function Home() {
         <button>등록 시작하기 <span>↗</span></button>
       </section>
 
-      <footer className="footer"><div className="brand"><span className="brand-mark">s<span>·</span></span><span>skillbase</span></div><span>AI Skills를 더 안전하고 쉽게.</span><span>© 2026 skillbase</span></footer>
+      <footer className="footer"><Link className="brand" href="/" aria-label="skillbase 홈"><span className="brand-mark">s<span>·</span></span><span>skillbase</span></Link><span>AI Skills를 더 안전하고 쉽게.</span><span>© 2026 skillbase</span></footer>
 
       {selectedSkill && (
         <div className="modal-backdrop" role="presentation">
@@ -723,11 +784,13 @@ export default function Home() {
             </div>
             <div className="modal-status"><span><CheckIcon /> {selectedSkill.trust}</span><span><CheckIcon /> 권한 검토 {selectedSkill.risk}</span><span>{selectedSkill.region} · {selectedSkill.sourceType}</span><span>라이선스 {selectedSkill.license ?? "미상"}</span></div>
             <p className="modal-source">출처: <a href={selectedSkill.sourceUrl} target="_blank" rel="noreferrer">{selectedSkill.source}</a> ↗</p>
+            <p className="modal-detail-link"><a href={`/skills/${selectedSkill.id}`}>검증 정보가 포함된 독립 상세 페이지 열기 ↗</a></p>
             <div className="modal-columns">
               <div className="modal-block"><div className="block-title"><span>01</span><h3>설치</h3></div><p>원본 출처의 설치 경로입니다. 실제 실행 권한과 파일 변경 내용을 확인한 뒤 설치하세요.</p><div className="code-box"><code>{selectedSkill.install}</code><button onClick={() => navigator.clipboard?.writeText(selectedSkill.install)} aria-label="설치 명령어 복사">복사</button></div><button className="verify-button" onClick={() => { setVerified(true); void trackUsage(selectedSkill.id, "install_verify"); }}>{verified ? "내 환경 확인 표시됨 ✓" : "설치 후 확인 표시"}</button></div>
-              <div className="modal-block"><div className="block-title"><span>02</span><h3>프롬프트 실행</h3></div><p>입력값을 채운 뒤 프롬프트를 복사하거나 지원 앱에서 바로 시작하세요.</p><div className="prompt-box"><textarea defaultValue={selectedSkill.prompt} aria-label="실행할 프롬프트" /></div><div className="prompt-actions"><button className="secondary-button" onClick={copyPrompt}>{copied ? "복사 완료 ✓" : "프롬프트 복사"}</button><button className="primary-button" onClick={copyAndOpen}>복사 후 앱 열기 ↗</button></div></div>
+              <div className="modal-block"><div className="block-title"><span>02</span><h3>프롬프트 준비</h3></div><p>입력값을 반영한 뒤 내용을 확인하고, 사용자가 직접 외부 앱으로 가져갑니다.</p><textarea className="prompt-input" value={promptInput} onChange={(event) => setPromptInput(event.target.value)} placeholder="이 Skill로 처리할 작업을 입력하세요." aria-label="프롬프트 입력값" /><button className="verify-button" onClick={applyPromptInput}>입력값 반영</button><div className="prompt-box"><textarea value={promptDraft} onChange={(event) => setPromptDraft(event.target.value)} aria-label="실행할 프롬프트" /></div><div className="prompt-actions"><button className="secondary-button" onClick={copyPrompt}>{copied ? "복사 완료 ✓" : "프롬프트 복사"}</button><button className="primary-button" onClick={copyAndOpen}>복사 후 앱 열기 ↗</button></div></div>
             </div>
-            <p className="modal-footnote">자동 붙여넣기는 사용자의 클릭 후 클립보드에 복사하고 지원 앱을 엽니다. 실제 설치·권한 검증은 로컬 환경에서 확인하세요.</p>
+            <p className="modal-footnote">브라우저는 외부 앱에 내용을 자동 전송할 수 없으므로, 프롬프트를 복사하고 확인 후 앱을 엽니다. 실제 설치·권한 검증은 로컬 환경에서 확인하세요.</p>
+            {executionStatus && <p className="execution-status" role="status">{executionStatus}</p>}
             {favoriteStatus && <p className="favorite-status">{favoriteStatus}</p>}
             <div className="feedback-box">
               <button className="feedback-toggle" onClick={() => { setReporting((current) => !current); setFeedbackStatus(""); }}>

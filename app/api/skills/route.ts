@@ -15,6 +15,7 @@ export async function GET(request: Request) {
     url.searchParams.get("verification")?.trim() ?? "",
     url.searchParams.get("sort")?.trim() ?? "recommended",
     Number(url.searchParams.get("limit") ?? 120),
+    url.searchParams.get("platform")?.trim() ?? "",
   );
   return Response.json({ skills, source: "d1", collectedAt: new Date().toISOString() }, {
     headers: { "cache-control": "no-store" },

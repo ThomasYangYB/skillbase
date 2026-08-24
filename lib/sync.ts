@@ -642,7 +642,7 @@ function isVerificationStatus(value: unknown): value is VerificationStatus {
   return value === "unverified" || value === "legacy" || value === "static_passed" || value === "static_warning" || value === "static_blocked" || value === "sandbox_passed" || value === "sandbox_fallback_passed" || value === "sandbox_failed" || value === "sandbox_unavailable";
 }
 
-export async function listStoredSkills(db: D1Database, search = "", region = "", category = "", verification = "", sort = "recommended", limit = 120) {
+export async function listStoredSkills(db: D1Database, search = "", region = "", category = "", verification = "", sort = "recommended", limit = 120, platform = "") {
   await ensureSchema(db);
   const clauses = ["status = 'active'", "approval_status = 'published'"];
   const args: (string | number)[] = [];
@@ -659,6 +659,10 @@ export async function listStoredSkills(db: D1Database, search = "", region = "",
     clauses.push("category = ?");
     args.push(category);
   }
+  if (platform) {
+    clauses.push("compatibility_json LIKE ?");
+    args.push(`%"${platform}"%`);
+  }
   if (["sandbox_passed", "sandbox_fallback_passed", "static_passed", "unverified", "static_warning", "static_blocked", "sandbox_failed", "sandbox_unavailable"].includes(verification)) {
     clauses.push("verification_status = ?");
     args.push(verification);
@@ -667,6 +671,25 @@ export async function listStoredSkills(db: D1Database, search = "", region = "",
   const statement = db.prepare(`SELECT skills.*, COALESCE((SELECT COUNT(*) FROM skill_usage_events WHERE skill_id = skills.id AND event_type IN ('view', 'copy', 'open') AND created_at >= datetime('now', '-30 days')), 0) AS usage_count, COALESCE((SELECT COUNT(*) FROM skill_favorites WHERE skill_id = skills.id), 0) AS favorite_count, COALESCE((SELECT COUNT(*) FROM skill_quality_issues WHERE skill_id = skills.id AND status = 'open'), 0) AS quality_issue_count FROM skills WHERE ${clauses.join(" AND ")} ORDER BY ${order} LIMIT ?`).bind(...args, Math.min(Math.max(limit, 1), 200));
   const result = await statement.all<Record<string, unknown>>();
   return result.results.map(rowToSkill);
+}
+
+export async function getPublishedSkill(db: D1Database, skillId: string) {
+  await ensureSchema(db);
+  const row = await db.prepare("SELECT skills.*, COALESCE((SELECT COUNT(*) FROM skill_usage_events WHERE skill_id = skills.id AND event_type IN ('view', 'copy', 'open') AND created_at >= datetime('now', '-30 days')), 0) AS usage_count, COALESCE((SELECT COUNT(*) FROM skill_favorites WHERE skill_id = skills.id), 0) AS favorite_count, COALESCE((SELECT COUNT(*) FROM skill_quality_issues WHERE skill_id = skills.id AND status = 'open'), 0) AS quality_issue_count FROM skills WHERE skills.id = ? AND skills.status = 'active' AND skills.approval_status = 'published'").bind(skillId).first<Record<string, unknown>>();
+  if (!row) return null;
+  return {
+    ...rowToSkill(row),
+    approvalUpdatedAt: row.approval_updated_at ? String(row.approval_updated_at) : null,
+    publishedAt: row.published_at ? String(row.published_at) : null,
+    verificationUpdatedAt: row.verification_updated_at ? String(row.verification_updated_at) : null,
+    verificationSummary: row.verification_summary ? String(row.verification_summary) : null,
+    sourceLinkStatus: String(row.source_link_status ?? "unknown"),
+    sourceLinkCheckedAt: row.source_link_checked_at ? String(row.source_link_checked_at) : null,
+    sourceLinkError: row.source_link_error ? String(row.source_link_error) : null,
+    licensePrevious: row.license_previous ? String(row.license_previous) : null,
+    licenseChangedAt: row.license_changed_at ? String(row.license_changed_at) : null,
+    updatedAt: String(row.updated_at),
+  };
 }
 
 type ReviewQueueRow = CatalogSkill & {
