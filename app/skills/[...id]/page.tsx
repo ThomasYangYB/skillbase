@@ -6,11 +6,11 @@ import SkillDetailClient from "./SkillDetailClient";
 
 export const dynamic = "force-dynamic";
 
-type PageProps = { params: Promise<{ id: string }> };
+type PageProps = { params: Promise<{ id: string[] }> };
 
-async function loadSkill(id: string) {
+async function loadSkill(idParts: string[]) {
   if (!runtimeEnv.DB) return null;
-  return getPublishedSkill(runtimeEnv.DB, id);
+  return getPublishedSkill(runtimeEnv.DB, idParts.join("/"));
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
