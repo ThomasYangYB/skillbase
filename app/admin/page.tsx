@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
 type ApprovalStatus = "review" | "approved" | "rejected" | "published";
-type VerificationStatus = "unverified" | "legacy" | "static_passed" | "static_warning" | "static_blocked" | "sandbox_passed" | "sandbox_failed" | "sandbox_unavailable";
+type VerificationStatus = "unverified" | "legacy" | "static_passed" | "static_warning" | "static_blocked" | "sandbox_passed" | "sandbox_fallback_passed" | "sandbox_failed" | "sandbox_unavailable";
 type QueueTab = ApprovalStatus | "all";
 type ReviewAction = "approve" | "publish" | "reject" | "review" | "unpublish";
 
@@ -61,11 +61,12 @@ const verificationLabel: Record<VerificationStatus, string> = {
   static_warning: "정적 경고",
   static_blocked: "정적 차단",
   sandbox_passed: "격리 검증 통과",
+  sandbox_fallback_passed: "무결성 fallback 통과 · 운영자 확인",
   sandbox_failed: "격리 검증 실패",
   sandbox_unavailable: "격리 실행기 미연결",
 };
 
-const publishableVerification = new Set<VerificationStatus>(["legacy", "static_passed", "sandbox_passed"]);
+const publishableVerification = new Set<VerificationStatus>(["legacy", "static_passed", "sandbox_passed", "sandbox_fallback_passed"]);
 
 function formatDate(value: string | null) {
   if (!value) return "아직 없음";
@@ -192,7 +193,7 @@ export default function AdminQueuePage() {
                 {skill.verificationSummary && <p className="verification-summary">{skill.verificationSummary}</p>}
                 <div className="review-actions">
                   <button className="action-secondary" disabled={busyId === skill.id} onClick={() => void requestVerification(skill.id, "static")}>{skill.verificationStatus === "unverified" ? "정적 검사" : "정적 재검사"}</button>
-                  {skill.verificationStatus !== "static_blocked" && skill.verificationStatus !== "sandbox_passed" && <button className="action-secondary" disabled={busyId === skill.id} onClick={() => void requestVerification(skill.id, "sandbox")}>격리 검증 요청</button>}
+                  {skill.verificationStatus !== "static_blocked" && skill.verificationStatus !== "sandbox_passed" && skill.verificationStatus !== "sandbox_fallback_passed" && <button className="action-secondary" disabled={busyId === skill.id} onClick={() => void requestVerification(skill.id, "sandbox")}>격리 검증 요청</button>}
                   {skill.approvalStatus === "review" && <><button className="action-primary" disabled={busyId === skill.id} onClick={() => void changeStatus(skill.id, "approve")}>승인 → 공개 전</button><button className="action-danger" disabled={busyId === skill.id} onClick={() => void changeStatus(skill.id, "reject")}>반려</button></>}
                   {skill.approvalStatus === "approved" && <>{publishableVerification.has(skill.verificationStatus) ? <button className="action-primary" disabled={busyId === skill.id} onClick={() => void changeStatus(skill.id, "publish")}>공개하기</button> : <button className="action-disabled" disabled>검증 후 공개</button>}<button className="action-danger" disabled={busyId === skill.id} onClick={() => void changeStatus(skill.id, "reject")}>반려</button></>}
                   {skill.approvalStatus === "rejected" && <button className="action-secondary" disabled={busyId === skill.id} onClick={() => void changeStatus(skill.id, "review")}>검토로 되돌리기</button>}

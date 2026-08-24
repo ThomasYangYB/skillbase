@@ -4,7 +4,7 @@ type SourceType = "공식" | "커뮤니티" | "디렉터리";
 
 export type ApprovalStatus = "review" | "approved" | "rejected" | "published";
 export type ReviewAction = "approve" | "publish" | "reject" | "review" | "unpublish";
-export type VerificationStatus = "unverified" | "legacy" | "static_passed" | "static_warning" | "static_blocked" | "sandbox_passed" | "sandbox_failed" | "sandbox_unavailable";
+export type VerificationStatus = "unverified" | "legacy" | "static_passed" | "static_warning" | "static_blocked" | "sandbox_passed" | "sandbox_fallback_passed" | "sandbox_failed" | "sandbox_unavailable";
 
 export type SyncEnv = {
   DB?: D1Database;
@@ -584,7 +584,7 @@ function isApprovalStatus(value: unknown): value is ApprovalStatus {
 }
 
 function isVerificationStatus(value: unknown): value is VerificationStatus {
-  return value === "unverified" || value === "legacy" || value === "static_passed" || value === "static_warning" || value === "static_blocked" || value === "sandbox_passed" || value === "sandbox_failed" || value === "sandbox_unavailable";
+  return value === "unverified" || value === "legacy" || value === "static_passed" || value === "static_warning" || value === "static_blocked" || value === "sandbox_passed" || value === "sandbox_fallback_passed" || value === "sandbox_failed" || value === "sandbox_unavailable";
 }
 
 export async function listStoredSkills(db: D1Database, search = "", region = "", category = "", limit = 120) {
@@ -667,8 +667,8 @@ export async function changeSkillApproval(
   if (row.status !== "active") throw new Error("오래된 출처의 Skill은 먼저 재수집해야 검토할 수 있습니다.");
   const current = isApprovalStatus(row.approval_status) ? row.approval_status : "review";
   const verificationStatus = isVerificationStatus(row.verification_status) ? row.verification_status : "legacy";
-  if (action === "publish" && !["legacy", "static_passed", "sandbox_passed"].includes(verificationStatus)) {
-    throw new Error("공개 전에 정적 검사 통과 또는 격리 검증 통과가 필요합니다.");
+  if (action === "publish" && !["legacy", "static_passed", "sandbox_passed", "sandbox_fallback_passed"].includes(verificationStatus)) {
+    throw new Error("공개 전에 정적 검사, 공식 격리 검증 또는 무결성 fallback 검증이 필요합니다.");
   }
   const transitions: Record<ReviewAction, { from: ApprovalStatus[]; to: ApprovalStatus }> = {
     approve: { from: ["review"], to: "approved" },

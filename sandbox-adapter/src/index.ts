@@ -35,7 +35,7 @@ function callbackAllowed(request: VerifyRequest, env: Env) {
   return !request.callbackUrl || request.callbackUrl === env.SKILLBASE_CALLBACK_URL;
 }
 
-async function notifyCatalog(request: VerifyRequest, env: Env, status: "passed" | "failed", summary: string, findings: unknown[]) {
+async function notifyCatalog(request: VerifyRequest, env: Env, status: "passed" | "failed", verificationMethod: "official_cli" | "integrity_fallback", summary: string, findings: unknown[]) {
   if (!request.callbackUrl || !env.SKILLBASE_CALLBACK_TOKEN) return null;
   const response = await fetch(request.callbackUrl, {
     method: "POST",
@@ -43,7 +43,7 @@ async function notifyCatalog(request: VerifyRequest, env: Env, status: "passed" 
       "content-type": "application/json",
       authorization: `Bearer ${env.SKILLBASE_CALLBACK_TOKEN}`,
     },
-    body: JSON.stringify({ jobId: request.jobId, sourceHash: request.sourceHash, status, summary, findings }),
+    body: JSON.stringify({ jobId: request.jobId, sourceHash: request.sourceHash, status, verificationMethod, summary, findings }),
   });
   if (!response.ok) throw new Error(`카탈로그 callback이 ${response.status}로 실패했습니다.`);
   return response;
@@ -60,11 +60,16 @@ async function verify(request: VerifyRequest, env: Env) {
   });
   const command = buildInstallCommand(parsed);
   try {
-    const primary = await sandbox.exec(command, { cwd: "/workspace", timeout: Math.min(request.constraints.timeoutMs, 15000) });
+    let primary: Awaited<ReturnType<typeof sandbox.exec>> | null = null;
+    let primaryError: string | null = null;
+    try {
+      primary = await sandbox.exec(command, { cwd: "/workspace", timeout: Math.min(request.constraints.timeoutMs, 15000) });
+    } catch (error) {
+      primaryError = error instanceof Error ? error.message : "공식 CLI 실행이 중단되었습니다.";
+    }
     let result = primary;
-    let usedFallback = false;
-    if (!primary.success) {
-      usedFallback = true;
+    const usedFallback = !primary?.success;
+    if (usedFallback) {
       const rawUrl = rawSourceUrl(request.sourceUrl);
       if (!rawUrl) throw new Error("원본 SKILL.md를 위한 안전한 raw URL을 만들 수 없습니다.");
       const rawResponse = await fetch(rawUrl, { headers: { accept: "text/plain", "user-agent": "skillbase-sandbox-adapter/1.0" } });
@@ -77,8 +82,9 @@ async function verify(request: VerifyRequest, env: Env) {
       await sandbox.writeFile(installPath, raw);
       result = await sandbox.exec(`test -s ${installPath}`, { cwd: "/workspace", timeout: 5000 });
     }
+    if (!result) throw new Error("격리 설치 결과가 없습니다.");
     const files = await sandbox.exec("find /workspace -maxdepth 6 -type f -name SKILL.md -print 2>/dev/null", { cwd: "/workspace", timeout: 5000 });
-    const output = trimOutput(`${usedFallback ? `공식 CLI 결과: ${primary.stdout}\n${primary.stderr}\n보조 설치 결과: ` : ""}${result.stdout}\n${result.stderr}`);
+    const output = trimOutput(`${usedFallback ? `공식 CLI 결과: ${primary ? `${primary.stdout}\n${primary.stderr}` : primaryError ?? "결과 없음"}\n보조 설치 결과: ` : ""}${result.stdout}\n${result.stderr}`);
     const installedSkill = files.stdout.split(/\r?\n/).some((path) => path.endsWith(`/${parsed.skillName}/SKILL.md`));
     const success = result.success && installedSkill;
     const summary = success
@@ -92,7 +98,7 @@ async function verify(request: VerifyRequest, env: Env) {
       { code: "sandbox-install", severity: success ? usedFallback ? "warning" : "info" : "blocker", title: success ? usedFallback ? "보조 격리 설치 성공" : "격리 설치 성공" : "격리 설치 확인 실패", detail: output || summary },
       { code: "sandbox-network-policy", severity: "info", title: "네트워크 정책 적용", detail: "인터넷은 기본 차단되고 GitHub·npm·Skills 감사 메타데이터 호스트만 허용했습니다." },
     ];
-    return { success, summary, findings, externalJobId: safeSandboxId(request.jobId) };
+    return { success, summary, findings, externalJobId: safeSandboxId(request.jobId), verificationMethod: usedFallback ? "integrity_fallback" as const : "official_cli" as const };
   } finally {
     await sandbox.destroy();
   }
@@ -116,11 +122,11 @@ export default {
       const status = result.success ? "passed" : "failed";
       let callbackWarning: string | undefined;
       try {
-        await notifyCatalog(parsed, env, status, result.summary, result.findings);
+        await notifyCatalog(parsed, env, status, result.verificationMethod, result.summary, result.findings);
       } catch (callbackError) {
         callbackWarning = callbackError instanceof Error ? callbackError.message : "카탈로그 callback을 완료하지 못했습니다.";
       }
-      return Response.json({ externalJobId: result.externalJobId, status, summary: result.summary, findings: result.findings, callbackWarning });
+      return Response.json({ externalJobId: result.externalJobId, status, verificationMethod: result.verificationMethod, summary: result.summary, findings: result.findings, callbackWarning });
     } catch (error) {
       const summary = error instanceof Error ? error.message : "격리 설치 검증에 실패했습니다.";
       return Response.json({ status: "failed", summary }, { status: 502 });

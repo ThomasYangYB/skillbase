@@ -6,6 +6,7 @@ type CallbackBody = {
   jobId?: string;
   sourceHash?: string;
   status?: "passed" | "failed";
+  verificationMethod?: "official_cli" | "integrity_fallback";
   summary?: string;
   findings?: unknown[];
 };
@@ -30,11 +31,14 @@ export async function POST(request: Request) {
     const finishedAt = new Date().toISOString();
     const summary = body.summary?.trim() || (body.status === "passed" ? "격리 환경 설치 검증을 통과했습니다." : "격리 환경 설치 검증에 실패했습니다.");
     const findings = Array.isArray(body.findings) ? body.findings : [];
+    const verificationStatus = body.status === "passed"
+      ? body.verificationMethod === "integrity_fallback" ? "sandbox_fallback_passed" : "sandbox_passed"
+      : "sandbox_failed";
     await runtimeEnv.DB.batch([
       runtimeEnv.DB.prepare("UPDATE skill_verification_jobs SET status = ?, summary = ?, findings_json = ?, finished_at = ? WHERE id = ? AND source_hash = ?").bind(body.status, summary, JSON.stringify(findings), finishedAt, body.jobId, body.sourceHash),
-      runtimeEnv.DB.prepare("UPDATE skills SET verification_status = ?, verification_updated_at = ?, verification_summary = ? WHERE id = ? AND content_hash = ?").bind(body.status === "passed" ? "sandbox_passed" : "sandbox_failed", finishedAt, summary, job.skill_id, body.sourceHash),
+      runtimeEnv.DB.prepare("UPDATE skills SET verification_status = ?, verification_updated_at = ?, verification_summary = ? WHERE id = ? AND content_hash = ?").bind(verificationStatus, finishedAt, summary, job.skill_id, body.sourceHash),
     ]);
-    return Response.json({ jobId: body.jobId, status: body.status, summary });
+    return Response.json({ jobId: body.jobId, status: body.status, verificationStatus, summary });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Sandbox callback을 처리하지 못했습니다." }, { status: 400 });
   }

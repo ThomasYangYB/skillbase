@@ -96,9 +96,12 @@ test("keeps the operator approval queue and publication gate configured", async 
   assert.match(adminPage, /공개하기/);
   assert.match(migration, /UPDATE `skills` SET `approval_status` = 'published'/);
   assert.match(schema, /skillVerificationJobs/);
-  assert.match(sync, /정적 검사 통과 또는 격리 검증 통과/);
+  assert.match(sync, /정적 검사, 공식 격리 검증 또는 무결성 fallback 검증/);
+  assert.match(sync, /sandbox_fallback_passed/);
   assert.match(verification, /runStaticVerification/);
   assert.match(verification, /SKILLBASE_SANDBOX_URL/);
+  assert.match(verification, /integrity_fallback/);
   assert.match(callback, /sourceHash/);
+  assert.match(callback, /verificationMethod/);
   assert.match(verificationMigration, /verification_status` = 'legacy'/);
 });

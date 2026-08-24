@@ -2,6 +2,7 @@ import { getStoredSkillRecord, type VerificationStatus } from "./sync";
 
 export type VerificationMode = "static" | "sandbox";
 export type VerificationJobStatus = "queued" | "running" | "passed" | "warning" | "blocked" | "failed" | "unavailable";
+export type SandboxVerificationMethod = "official_cli" | "integrity_fallback";
 export type VerificationFinding = {
   code: string;
   severity: "blocker" | "warning" | "info";
@@ -140,7 +141,7 @@ export async function requestSandboxVerification(env: VerificationEnv, skillId: 
   const createdAt = now();
   const jobId = crypto.randomUUID();
   const sourceHash = String(skill.content_hash);
-  await db.prepare("INSERT INTO skill_verification_jobs (id, skill_id, mode, status, requested_by, requested_email, source_hash, verifier_version, created_at) VALUES (?, ?, 'sandbox', 'queued', ?, ?, ?, 'sandbox-adapter-1', ?)").bind(jobId, skillId, actor.id, actor.email ?? null, sourceHash, createdAt).run();
+  await db.prepare("INSERT INTO skill_verification_jobs (id, skill_id, mode, status, requested_by, requested_email, source_hash, verifier_version, created_at) VALUES (?, ?, 'sandbox', 'queued', ?, ?, ?, 'sandbox-adapter-2', ?)").bind(jobId, skillId, actor.id, actor.email ?? null, sourceHash, createdAt).run();
   if (!env.SKILLBASE_SANDBOX_URL) {
     const summary = "Cloudflare Sandbox 어댑터가 연결되지 않았습니다. 정적 검사 결과만 사용하세요.";
     await db.prepare("UPDATE skill_verification_jobs SET status = 'unavailable', summary = ?, finished_at = ? WHERE id = ?").bind(summary, now(), jobId).run();
@@ -155,18 +156,21 @@ export async function requestSandboxVerification(env: VerificationEnv, skillId: 
       headers,
       body: JSON.stringify({ jobId, skillId, sourceUrl: String(skill.source_url), sourceHash, install: String(skill.install), callbackUrl, constraints: { network: "deny-by-default", timeoutMs: 90000, filesystem: "ephemeral", secrets: "none" } }),
     });
-    const payload = await response.json().catch(() => ({})) as { externalJobId?: string; status?: string; summary?: string; findings?: unknown[] };
+    const payload = await response.json().catch(() => ({})) as { externalJobId?: string; status?: string; summary?: string; findings?: unknown[]; verificationMethod?: SandboxVerificationMethod };
     if (!response.ok) throw new Error(payload.summary ?? `Sandbox adapter returned ${response.status}`);
     const passed = payload.status === "passed";
     const failed = payload.status === "failed";
     const summary = payload.summary ?? (passed ? "격리 환경 설치 검증을 통과했습니다." : failed ? "격리 환경 설치 검증에 실패했습니다." : "외부 Sandbox에서 검증 대기 중입니다.");
     const findings = Array.isArray(payload.findings) ? payload.findings : [];
     const jobStatus = passed ? "passed" : failed ? "failed" : "queued";
+    const verificationStatus: VerificationStatus = passed
+      ? payload.verificationMethod === "integrity_fallback" ? "sandbox_fallback_passed" : "sandbox_passed"
+      : "sandbox_failed";
     await db.batch([
       db.prepare("UPDATE skill_verification_jobs SET status = ?, external_job_id = ?, summary = ?, findings_json = ?, finished_at = ? WHERE id = ?").bind(jobStatus, payload.externalJobId ?? null, summary, JSON.stringify(findings), passed || failed ? now() : null, jobId),
-      ...(passed || failed ? [db.prepare("UPDATE skills SET verification_status = ?, verification_updated_at = ?, verification_summary = ? WHERE id = ? AND content_hash = ?").bind(passed ? "sandbox_passed" : "sandbox_failed", now(), summary, skillId, sourceHash)] : []),
+      ...(passed || failed ? [db.prepare("UPDATE skills SET verification_status = ?, verification_updated_at = ?, verification_summary = ? WHERE id = ? AND content_hash = ?").bind(verificationStatus, now(), summary, skillId, sourceHash)] : []),
     ]);
-    return { jobId, mode: "sandbox" as const, status: passed ? "sandbox_passed" as const : failed ? "sandbox_failed" as const : "unverified" as const, jobStatus: passed ? "passed" as const : failed ? "failed" as const : "queued" as const, summary, findings };
+    return { jobId, mode: "sandbox" as const, status: passed ? verificationStatus : failed ? "sandbox_failed" as const : "unverified" as const, jobStatus: passed ? "passed" as const : failed ? "failed" as const : "queued" as const, summary, findings };
   } catch (error) {
     const summary = error instanceof Error ? error.message : "Sandbox 어댑터 요청에 실패했습니다.";
     await db.prepare("UPDATE skill_verification_jobs SET status = 'failed', summary = ?, finished_at = ? WHERE id = ?").bind(summary, now(), jobId).run();
