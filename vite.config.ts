@@ -24,6 +24,7 @@ const localBindingConfig = {
         },
       ]
     : [],
+  ai: { binding: "AI" },
   r2_buckets: r2
     ? [
         {

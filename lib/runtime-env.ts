@@ -1,4 +1,5 @@
 import { env as cloudflareEnv } from "cloudflare:workers";
+import type { SummaryAiBinding } from "./sync";
 
 export type RuntimeEnv = {
   DB?: D1Database;
@@ -10,6 +11,7 @@ export type RuntimeEnv = {
   SKILLBASE_SANDBOX_URL?: string;
   SKILLBASE_SANDBOX_TOKEN?: string;
   SKILLBASE_ALERT_WEBHOOK_URL?: string;
+  AI?: SummaryAiBinding;
 };
 
 export const runtimeEnv = cloudflareEnv as unknown as RuntimeEnv;

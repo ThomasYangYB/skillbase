@@ -5,6 +5,7 @@ import Link from "next/link";
 
 type SkillDetail = {
   id: string; name: string; category: string; description: string; tags: string[]; compatibility: string[];
+  summaryKo?: string | null;
   risk: "낮음" | "주의"; region: "국내" | "해외"; source: string; sourceUrl: string; sourceType: "공식" | "커뮤니티" | "디렉터리";
   trust: "원본 확인" | "검토 필요"; prompt: string; install: string; appUrl: string; license?: string | null;
   verificationStatus?: string; verificationSummary?: string | null; verificationUpdatedAt?: string | null;
@@ -75,7 +76,7 @@ export default function SkillDetailClient({ skillId }: { skillId: string }) {
     <main className="detail-shell">
       <header className="detail-topbar"><Link prefetch={false} className="brand" href="/" aria-label="skillbase 홈" onClick={(event) => { event.preventDefault(); window.location.assign("/"); }}><span className="brand-mark">s<span>·</span></span><span>skillbase</span></Link><Link className="detail-back" href="/">← 카탈로그</Link></header>
       <article className="detail-page">
-        <div className="detail-heading"><div className="detail-monogram">{skill.name.slice(0, 2).toUpperCase()}</div><div><p className="section-kicker">{skill.category}</p><h1>{skill.name}</h1><p>{skill.description}</p></div><button className={`favorite-button ${favorite ? "active" : ""}`} onClick={() => void toggleFavorite()} aria-label="즐겨찾기">{favorite ? "★" : "☆"}</button></div>
+        <div className="detail-heading"><div className="detail-monogram">{skill.name.slice(0, 2).toUpperCase()}</div><div><p className="section-kicker">{skill.category}</p><h1>{skill.name}</h1><p>{skill.description}</p>{skill.summaryKo && <p className="detail-summary"><strong>한국어 요약</strong>{skill.summaryKo}</p>}</div><button className={`favorite-button ${favorite ? "active" : ""}`} onClick={() => void toggleFavorite()} aria-label="즐겨찾기">{favorite ? "★" : "☆"}</button></div>
         <div className="detail-badges"><span>{verificationLabel(skill.verificationStatus)}</span><span>권한 위험도 {skill.risk}</span><span>{skill.region} · {skill.sourceType}</span><span>라이선스 {skill.license ?? "미상"}</span></div>
         <div className="detail-source"><span>원본 출처</span><a href={skill.sourceUrl} target="_blank" rel="noreferrer">{skill.source} ↗</a></div>
         <div className="detail-grid">

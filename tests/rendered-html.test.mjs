@@ -76,6 +76,23 @@ test("keeps the scheduled Agent Skills collection pipeline configured", async ()
   assert.match(hosting, /"d1": "DB"/);
 });
 
+test("queues AI Korean summaries for new and changed Skills", async () => {
+  const [sync, worker, route, migration, vite] = await Promise.all([
+    readFile(new URL("../lib/sync.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/sync/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0007_skill_summaries.sql", import.meta.url), "utf8"),
+    readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(sync, /summary_status IN \('pending', 'failed'\)/);
+  assert.match(sync, /SUMMARY_MODEL/);
+  assert.match(sync, /summary_ko/);
+  assert.match(worker, /processPendingSkillSummaries/);
+  assert.match(route, /processPendingSkillSummaries/);
+  assert.match(migration, /summary_ko/);
+  assert.match(vite, /ai: \{ binding: "AI" \}/);
+});
+
 test("keeps the operator approval queue and publication gate configured", async () => {
   const [schema, sync, route, operator, adminPage, migration, verification, callback, verificationRoute, verificationMigration, metricsRoute, exportRoute, observabilityMigration, alertsRoute, backupRoute, qualityRoute, usageRoute, favoritesRoute, feedbackRoute, qualityLib, usageLib, maintenanceWorkflow, dependabot, operationalMigration] = await Promise.all([
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),

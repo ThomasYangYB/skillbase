@@ -2,7 +2,7 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { recordOpsAlerts } from "../lib/alerts";
-import { syncAllSources } from "../lib/sync";
+import { processPendingSkillSummaries, syncAllSources, type SummaryAiBinding } from "../lib/sync";
 
 interface Env {
   ASSETS: Fetcher;
@@ -15,6 +15,7 @@ interface Env {
   SKILLBASE_SANDBOX_URL?: string;
   SKILLBASE_SANDBOX_TOKEN?: string;
   SKILLBASE_ALERT_WEBHOOK_URL?: string;
+  AI?: SummaryAiBinding;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -65,7 +66,10 @@ const worker = {
   },
 
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(syncAllSources(env).catch(async (error) => {
+    ctx.waitUntil((async () => {
+      await syncAllSources(env);
+      await processPendingSkillSummaries(env);
+    })().catch(async (error) => {
       console.error(`Scheduled skill sync failed for ${controller.cron}`, error);
       await recordOpsAlerts(env, [{ kind: "sync_failure", severity: "critical", title: "예약 수집 작업 중단", message: error instanceof Error ? error.message : "예약 수집 작업이 중단되었습니다.", fingerprint: "sync:scheduled-exception" }]);
     }));

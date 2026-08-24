@@ -9,10 +9,15 @@ export type ApprovalStatus = "review" | "approved" | "rejected" | "published";
 export type ReviewAction = "approve" | "publish" | "reject" | "review" | "unpublish";
 export type VerificationStatus = "unverified" | "legacy" | "static_passed" | "static_warning" | "static_blocked" | "sandbox_passed" | "sandbox_fallback_passed" | "sandbox_failed" | "sandbox_unavailable";
 
+export type SummaryAiBinding = {
+  run(model: string, input: { messages: Array<{ role: "system" | "user"; content: string }> }): Promise<unknown>;
+};
+
 export type SyncEnv = {
   DB?: D1Database;
   GITHUB_TOKEN?: string;
   SKILLBASE_ALERT_WEBHOOK_URL?: string;
+  AI?: SummaryAiBinding;
 };
 
 export type CatalogSkill = {
@@ -20,6 +25,9 @@ export type CatalogSkill = {
   name: string;
   category: string;
   description: string;
+  summaryKo?: string | null;
+  summaryStatus?: "pending" | "generated" | "failed";
+  summaryUpdatedAt?: string | null;
   tags: string[];
   compatibility: string[];
   risk: "낮음" | "주의";
@@ -449,7 +457,7 @@ async function collectDirectory(source: SyncSource, env: SyncEnv): Promise<Colle
 
 async function ensureSchema(db: D1Database) {
   await db.batch([
-    db.prepare("CREATE TABLE IF NOT EXISTS skills (id TEXT PRIMARY KEY, source_id TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, region TEXT NOT NULL, source TEXT NOT NULL, source_url TEXT NOT NULL, source_type TEXT NOT NULL, compatibility_json TEXT NOT NULL DEFAULT '[]', tags_json TEXT NOT NULL DEFAULT '[]', install TEXT NOT NULL, prompt TEXT NOT NULL, app_url TEXT NOT NULL, risk TEXT NOT NULL, trust TEXT NOT NULL, license TEXT, license_previous TEXT, license_changed_at TEXT, content_hash TEXT NOT NULL, discovered_via TEXT NOT NULL, source_updated_at TEXT, last_seen_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', approval_status TEXT NOT NULL DEFAULT 'review', approval_updated_at TEXT, approved_by TEXT, published_at TEXT, verification_status TEXT NOT NULL DEFAULT 'unverified', verification_updated_at TEXT, verification_summary TEXT, source_link_status TEXT NOT NULL DEFAULT 'unknown', source_link_checked_at TEXT, source_link_error TEXT, duplicate_of TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS skills (id TEXT PRIMARY KEY, source_id TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL, summary_ko TEXT, summary_status TEXT NOT NULL DEFAULT 'pending', summary_updated_at TEXT, summary_error TEXT, category TEXT NOT NULL, region TEXT NOT NULL, source TEXT NOT NULL, source_url TEXT NOT NULL, source_type TEXT NOT NULL, compatibility_json TEXT NOT NULL DEFAULT '[]', tags_json TEXT NOT NULL DEFAULT '[]', install TEXT NOT NULL, prompt TEXT NOT NULL, app_url TEXT NOT NULL, risk TEXT NOT NULL, trust TEXT NOT NULL, license TEXT, license_previous TEXT, license_changed_at TEXT, content_hash TEXT NOT NULL, discovered_via TEXT NOT NULL, source_updated_at TEXT, last_seen_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', approval_status TEXT NOT NULL DEFAULT 'review', approval_updated_at TEXT, approved_by TEXT, published_at TEXT, verification_status TEXT NOT NULL DEFAULT 'unverified', verification_updated_at TEXT, verification_summary TEXT, source_link_status TEXT NOT NULL DEFAULT 'unknown', source_link_checked_at TEXT, source_link_error TEXT, duplicate_of TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS sync_sources (id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, url TEXT NOT NULL, region TEXT NOT NULL, source_type TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, last_synced_at TEXT, last_error TEXT)"),
     db.prepare("CREATE TABLE IF NOT EXISTS sync_runs (id TEXT PRIMARY KEY, started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL, sources_scanned INTEGER NOT NULL DEFAULT 0, candidates_seen INTEGER NOT NULL DEFAULT 0, accepted INTEGER NOT NULL DEFAULT 0, rejected INTEGER NOT NULL DEFAULT 0, error_summary TEXT)"),
     db.prepare("CREATE TABLE IF NOT EXISTS skill_feedback (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, type TEXT NOT NULL, message TEXT, actor_id TEXT, created_at TEXT NOT NULL)"),
@@ -516,6 +524,7 @@ async function ensureSchema(db: D1Database) {
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skills_approval_status ON skills(approval_status, updated_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skills_verification_status ON skills(verification_status, updated_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_verification_jobs_method ON skill_verification_jobs(verification_method, created_at)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_skills_summary_status ON skills(summary_status, updated_at)"),
   ]);
 }
 
@@ -524,6 +533,14 @@ async function writeSources(db: D1Database) {
 }
 
 async function writeSkills(db: D1Database, candidates: CatalogSkill[], seenAt: string) {
+  const existingHashes = new Map<string, string>();
+  for (let index = 0; index < candidates.length; index += 80) {
+    const chunk = candidates.slice(index, index + 80);
+    if (chunk.length === 0) continue;
+    const placeholders = chunk.map(() => "?").join(",");
+    const result = await db.prepare(`SELECT id, content_hash FROM skills WHERE id IN (${placeholders})`).bind(...chunk.map((skill) => skill.id)).all<{ id: string; content_hash: string }>();
+    for (const row of result.results ?? []) existingHashes.set(String(row.id), String(row.content_hash));
+  }
   const statements = candidates.map(async (skill) => {
     return db.prepare("INSERT INTO skills (id, source_id, name, description, category, region, source, source_url, source_type, compatibility_json, tags_json, install, prompt, app_url, risk, trust, license, license_previous, license_changed_at, content_hash, discovered_via, source_updated_at, last_seen_at, status, approval_status, approval_updated_at, approved_by, published_at, verification_status, verification_updated_at, verification_summary, source_link_status, source_link_checked_at, source_link_error, duplicate_of, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, 'active', 'review', ?, NULL, NULL, 'unverified', NULL, NULL, 'unknown', NULL, NULL, NULL, ?, ?) ON CONFLICT(id) DO UPDATE SET source_id = excluded.source_id, name = excluded.name, description = excluded.description, category = excluded.category, region = excluded.region, source = excluded.source, source_url = excluded.source_url, source_type = excluded.source_type, compatibility_json = excluded.compatibility_json, tags_json = excluded.tags_json, install = excluded.install, prompt = excluded.prompt, app_url = excluded.app_url, risk = excluded.risk, trust = excluded.trust, license_previous = CASE WHEN COALESCE(skills.license, '') <> COALESCE(excluded.license, '') THEN skills.license ELSE skills.license_previous END, license_changed_at = CASE WHEN COALESCE(skills.license, '') <> COALESCE(excluded.license, '') THEN excluded.updated_at ELSE skills.license_changed_at END, license = excluded.license, content_hash = excluded.content_hash, discovered_via = excluded.discovered_via, source_updated_at = excluded.source_updated_at, last_seen_at = excluded.last_seen_at, status = 'active', approval_status = CASE WHEN skills.content_hash <> excluded.content_hash THEN 'review' ELSE skills.approval_status END, approval_updated_at = CASE WHEN skills.content_hash <> excluded.content_hash THEN excluded.approval_updated_at ELSE skills.approval_updated_at END, approved_by = CASE WHEN skills.content_hash <> excluded.content_hash THEN NULL ELSE skills.approved_by END, published_at = CASE WHEN skills.content_hash <> excluded.content_hash THEN NULL ELSE skills.published_at END, verification_status = CASE WHEN skills.content_hash <> excluded.content_hash THEN 'unverified' ELSE skills.verification_status END, verification_updated_at = CASE WHEN skills.content_hash <> excluded.content_hash THEN NULL ELSE skills.verification_updated_at END, verification_summary = CASE WHEN skills.content_hash <> excluded.content_hash THEN NULL ELSE skills.verification_summary END, source_link_status = CASE WHEN skills.source_url <> excluded.source_url OR skills.content_hash <> excluded.content_hash THEN 'unknown' ELSE skills.source_link_status END, source_link_checked_at = CASE WHEN skills.source_url <> excluded.source_url OR skills.content_hash <> excluded.content_hash THEN NULL ELSE skills.source_link_checked_at END, source_link_error = CASE WHEN skills.source_url <> excluded.source_url OR skills.content_hash <> excluded.content_hash THEN NULL ELSE skills.source_link_error END, duplicate_of = CASE WHEN skills.content_hash <> excluded.content_hash THEN NULL ELSE skills.duplicate_of END, updated_at = excluded.updated_at").bind(
       skill.id,
@@ -554,6 +571,10 @@ async function writeSkills(db: D1Database, candidates: CatalogSkill[], seenAt: s
   });
   const resolved = await Promise.all(statements);
   for (let index = 0; index < resolved.length; index += 50) await db.batch(resolved.slice(index, index + 50));
+  const changed = candidates.filter((skill) => existingHashes.get(skill.id) !== skill.contentHash);
+  for (let index = 0; index < changed.length; index += 50) {
+    await db.batch(changed.slice(index, index + 50).map((skill) => db.prepare("UPDATE skills SET summary_ko = NULL, summary_status = 'pending', summary_updated_at = NULL, summary_error = NULL WHERE id = ? AND content_hash = ?").bind(skill.id, skill.contentHash)));
+  }
 }
 
 export async function syncAllSources(env: SyncEnv) {
@@ -603,12 +624,96 @@ export async function syncAllSources(env: SyncEnv) {
   return { runId, status, sourcesScanned: SYNC_SOURCES.length, candidatesSeen, accepted, rejected, errors: errors.slice(0, 20), quality };
 }
 
+const SUMMARY_MODEL = "@cf/meta/llama-3.2-3b-instruct";
+const SUMMARY_BATCH_SIZE = 8;
+const SUMMARY_MAX_PER_RUN = 32;
+
+type SummaryRow = { id: string; name: string; description: string; category: string; tags_json: string; content_hash: string };
+
+function extractAiText(result: unknown) {
+  if (typeof result === "string") return result;
+  if (!result || typeof result !== "object") return "";
+  const value = result as { response?: unknown; result?: unknown };
+  if (typeof value.response === "string") return value.response;
+  if (typeof value.result === "string") return value.result;
+  if (value.response && typeof value.response === "object") return extractAiText(value.response);
+  return "";
+}
+
+function parseAiSummaries(text: string, expectedIds: Set<string>) {
+  const arrayStart = text.indexOf("[");
+  const arrayEnd = text.lastIndexOf("]");
+  if (arrayStart < 0 || arrayEnd <= arrayStart) throw new Error("AI 요약 응답에서 JSON 배열을 찾지 못했습니다.");
+  const parsed: unknown = JSON.parse(text.slice(arrayStart, arrayEnd + 1));
+  if (!Array.isArray(parsed)) throw new Error("AI 요약 응답 형식이 올바르지 않습니다.");
+  const summaries = new Map<string, string>();
+  for (const item of parsed) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as { id?: unknown; summaryKo?: unknown; summary_ko?: unknown };
+    const id = typeof row.id === "string" ? row.id : "";
+    const summary = typeof row.summaryKo === "string" ? row.summaryKo : typeof row.summary_ko === "string" ? row.summary_ko : "";
+    const normalized = summary.replace(/\s+/g, " ").trim();
+    if (expectedIds.has(id) && /[가-힣]/.test(normalized) && normalized.length >= 8 && normalized.length <= 180) summaries.set(id, normalized);
+  }
+  if (summaries.size !== expectedIds.size) throw new Error(`AI 요약 ${expectedIds.size}건 중 ${summaries.size}건만 유효합니다.`);
+  return summaries;
+}
+
+async function generateSummaryBatch(ai: SummaryAiBinding, rows: SummaryRow[]) {
+  const input = rows.map((row) => ({ id: row.id, name: row.name, category: row.category, tags: parseJsonArray(row.tags_json), description: row.description.slice(0, 1800) }));
+  const result = await ai.run(SUMMARY_MODEL, {
+    messages: [
+      { role: "system", content: "너는 AI Skill 카탈로그의 한국어 편집자다. 주어진 설명만 근거로 각 Skill을 한국어 한 문장으로 요약한다. 영어 설명은 한국어로 번역한 뒤 핵심 기능을 요약하고, 이미 한국어인 설명은 자연스럽게 압축한다. 기능을 추측하거나 과장하지 않는다. 반드시 JSON 배열만 출력하고 형식은 [{\"id\":\"원본 id\",\"summaryKo\":\"한국어 한 문장\"}]이다. 각 요약은 8~180자다." },
+      { role: "user", content: JSON.stringify(input) },
+    ],
+  });
+  return parseAiSummaries(extractAiText(result), new Set(rows.map((row) => row.id)));
+}
+
+export async function processPendingSkillSummaries(env: SyncEnv, maxPerRun = SUMMARY_MAX_PER_RUN) {
+  if (!env.DB) throw new Error("D1 binding DB is unavailable");
+  await ensureSchema(env.DB);
+  const pendingResult = await env.DB.prepare("SELECT id, name, description, category, tags_json, content_hash FROM skills WHERE status = 'active' AND summary_status IN ('pending', 'failed') ORDER BY updated_at ASC LIMIT ?").bind(Math.min(Math.max(maxPerRun, 1), 80)).all<SummaryRow>();
+  const pending = pendingResult.results ?? [];
+  if (pending.length === 0) return { status: "idle", processed: 0, failed: 0, remaining: 0 };
+  if (!env.AI) {
+    await recordOpsAlerts(env, [{ kind: "quality_issue", severity: "warning", title: "AI 한국어 요약 바인딩 미연결", message: `${pending.length}개 Skill의 한국어 요약이 대기 중입니다. Cloudflare Workers AI 바인딩 AI를 연결하면 다음 수집 주기에 자동 처리됩니다.`, fingerprint: "summary:ai-binding-missing" }]);
+    return { status: "ai_unavailable", processed: 0, failed: 0, remaining: pending.length };
+  }
+
+  let processed = 0;
+  let failed = 0;
+  for (let index = 0; index < pending.length; index += SUMMARY_BATCH_SIZE) {
+    const batch = pending.slice(index, index + SUMMARY_BATCH_SIZE);
+    try {
+      const summaries = await generateSummaryBatch(env.AI, batch);
+      const updatedAt = now();
+      await env.DB.batch(batch.map((row) => env.DB!.prepare("UPDATE skills SET summary_ko = ?, summary_status = 'generated', summary_updated_at = ?, summary_error = NULL WHERE id = ? AND content_hash = ?").bind(summaries.get(row.id), updatedAt, row.id, row.content_hash)));
+      processed += batch.length;
+    } catch (error) {
+      failed += batch.length;
+      const message = error instanceof Error ? error.message : "AI 한국어 요약 생성에 실패했습니다.";
+      await env.DB.batch(batch.map((row) => env.DB!.prepare("UPDATE skills SET summary_status = 'failed', summary_error = ? WHERE id = ? AND content_hash = ?").bind(message.slice(0, 500), row.id, row.content_hash)));
+      await recordOpsAlerts(env, [{ kind: "quality_issue", severity: "warning", title: "AI 한국어 요약 생성 실패", message, fingerprint: `summary:failed:${rowFingerprint(batch)}` }]);
+    }
+  }
+  const remainingRow = await env.DB.prepare("SELECT COUNT(*) AS count FROM skills WHERE status = 'active' AND summary_status IN ('pending', 'failed')").first<{ count: number }>();
+  return { status: failed > 0 ? "completed_with_errors" : "completed", processed, failed, remaining: Number(remainingRow?.count ?? 0) };
+}
+
+function rowFingerprint(rows: SummaryRow[]) {
+  return rows.map((row) => row.id).join("|").slice(0, 180);
+}
+
 function rowToSkill(row: Record<string, unknown>): CatalogSkill & { status: string; updatedAt: string } {
   return {
     id: String(row.id),
     name: String(row.name),
     category: String(row.category),
     description: String(row.description),
+    summaryKo: row.summary_ko ? String(row.summary_ko) : null,
+    summaryStatus: row.summary_status === "generated" || row.summary_status === "failed" ? row.summary_status : "pending",
+    summaryUpdatedAt: row.summary_updated_at ? String(row.summary_updated_at) : null,
     tags: parseJsonArray(String(row.tags_json ?? "[]")),
     compatibility: parseJsonArray(String(row.compatibility_json ?? "[]")),
     risk: row.risk === "주의" ? "주의" : "낮음",
