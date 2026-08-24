@@ -102,6 +102,32 @@ test("protects mobile layouts from horizontal overflow", async () => {
   assert.match(css, /\.prompt-actions \{ flex-direction: column; \}/);
 });
 
+test("keeps operations, public API, and user submission safeguards configured", async () => {
+  const [sync, summaryRoute, submissionRoute, adminSubmissionRoute, backup, feedback, publicApi, detail, migration] = await Promise.all([
+    readFile(new URL("../lib/sync.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/admin/summaries/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/submissions/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/admin/submissions/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/backup.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/feedback/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/v1/skills/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/skills/[...id]/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0009_skill_submissions.sql", import.meta.url), "utf8"),
+  ]);
+  assert.match(sync, /getSummaryMetrics/);
+  assert.match(sync, /summary_review_status/);
+  assert.match(summaryRoute, /retrySkillSummaries/);
+  assert.match(summaryRoute, /reviewSkillSummary/);
+  assert.match(submissionRoute, /하루에 3건까지/);
+  assert.match(adminSubmissionRoute, /submission_approve/);
+  assert.match(backup, /usageEvents/);
+  assert.match(feedback, /application\/json/);
+  assert.match(feedback, /recordOpsAlerts/);
+  assert.match(publicApi, /access-control-allow-origin/);
+  assert.match(detail, /openGraph/);
+  assert.match(migration, /skill_submissions/);
+});
+
 test("keeps the operator approval queue and publication gate configured", async () => {
   const [schema, sync, route, operator, adminPage, migration, verification, callback, verificationRoute, verificationMigration, metricsRoute, exportRoute, observabilityMigration, alertsRoute, backupRoute, qualityRoute, usageRoute, favoritesRoute, feedbackRoute, qualityLib, usageLib, maintenanceWorkflow, dependabot, operationalMigration] = await Promise.all([
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),

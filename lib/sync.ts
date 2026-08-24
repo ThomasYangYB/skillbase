@@ -28,6 +28,10 @@ export type CatalogSkill = {
   summaryKo?: string | null;
   summaryStatus?: "pending" | "generated" | "failed";
   summaryUpdatedAt?: string | null;
+  summaryError?: string | null;
+  summaryReviewStatus?: "pending" | "approved" | "needs_revision";
+  summaryReviewedBy?: string | null;
+  summaryReviewedAt?: string | null;
   tags: string[];
   compatibility: string[];
   risk: "낮음" | "주의";
@@ -457,7 +461,7 @@ async function collectDirectory(source: SyncSource, env: SyncEnv): Promise<Colle
 
 async function ensureSchema(db: D1Database) {
   await db.batch([
-    db.prepare("CREATE TABLE IF NOT EXISTS skills (id TEXT PRIMARY KEY, source_id TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL, summary_ko TEXT, summary_status TEXT NOT NULL DEFAULT 'pending', summary_updated_at TEXT, summary_error TEXT, category TEXT NOT NULL, region TEXT NOT NULL, source TEXT NOT NULL, source_url TEXT NOT NULL, source_type TEXT NOT NULL, compatibility_json TEXT NOT NULL DEFAULT '[]', tags_json TEXT NOT NULL DEFAULT '[]', install TEXT NOT NULL, prompt TEXT NOT NULL, app_url TEXT NOT NULL, risk TEXT NOT NULL, trust TEXT NOT NULL, license TEXT, license_previous TEXT, license_changed_at TEXT, content_hash TEXT NOT NULL, discovered_via TEXT NOT NULL, source_updated_at TEXT, last_seen_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', approval_status TEXT NOT NULL DEFAULT 'review', approval_updated_at TEXT, approved_by TEXT, published_at TEXT, verification_status TEXT NOT NULL DEFAULT 'unverified', verification_updated_at TEXT, verification_summary TEXT, source_link_status TEXT NOT NULL DEFAULT 'unknown', source_link_checked_at TEXT, source_link_error TEXT, duplicate_of TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS skills (id TEXT PRIMARY KEY, source_id TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL, summary_ko TEXT, summary_status TEXT NOT NULL DEFAULT 'pending', summary_updated_at TEXT, summary_error TEXT, summary_review_status TEXT NOT NULL DEFAULT 'pending', summary_reviewed_by TEXT, summary_reviewed_at TEXT, category TEXT NOT NULL, region TEXT NOT NULL, source TEXT NOT NULL, source_url TEXT NOT NULL, source_type TEXT NOT NULL, compatibility_json TEXT NOT NULL DEFAULT '[]', tags_json TEXT NOT NULL DEFAULT '[]', install TEXT NOT NULL, prompt TEXT NOT NULL, app_url TEXT NOT NULL, risk TEXT NOT NULL, trust TEXT NOT NULL, license TEXT, license_previous TEXT, license_changed_at TEXT, content_hash TEXT NOT NULL, discovered_via TEXT NOT NULL, source_updated_at TEXT, last_seen_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', approval_status TEXT NOT NULL DEFAULT 'review', approval_updated_at TEXT, approved_by TEXT, published_at TEXT, verification_status TEXT NOT NULL DEFAULT 'unverified', verification_updated_at TEXT, verification_summary TEXT, source_link_status TEXT NOT NULL DEFAULT 'unknown', source_link_checked_at TEXT, source_link_error TEXT, duplicate_of TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS sync_sources (id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, url TEXT NOT NULL, region TEXT NOT NULL, source_type TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, last_synced_at TEXT, last_error TEXT)"),
     db.prepare("CREATE TABLE IF NOT EXISTS sync_runs (id TEXT PRIMARY KEY, started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL, sources_scanned INTEGER NOT NULL DEFAULT 0, candidates_seen INTEGER NOT NULL DEFAULT 0, accepted INTEGER NOT NULL DEFAULT 0, rejected INTEGER NOT NULL DEFAULT 0, error_summary TEXT)"),
     db.prepare("CREATE TABLE IF NOT EXISTS skill_feedback (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, type TEXT NOT NULL, message TEXT, actor_id TEXT, created_at TEXT NOT NULL)"),
@@ -465,6 +469,7 @@ async function ensureSchema(db: D1Database) {
     db.prepare("CREATE TABLE IF NOT EXISTS skill_quality_issues (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, kind TEXT NOT NULL, severity TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', message TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}', checked_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS skill_usage_events (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, event_type TEXT NOT NULL, actor_id TEXT, created_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS skill_favorites (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, actor_id TEXT NOT NULL, created_at TEXT NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS skill_submissions (id TEXT PRIMARY KEY, actor_id TEXT, actor_email TEXT, name TEXT NOT NULL, source_url TEXT NOT NULL, source_type TEXT NOT NULL, category TEXT NOT NULL, description TEXT NOT NULL, install TEXT NOT NULL, prompt TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', reviewer_id TEXT, review_note TEXT, created_at TEXT NOT NULL, reviewed_at TEXT)"),
     db.prepare("CREATE TABLE IF NOT EXISTS skill_review_events (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, action TEXT NOT NULL, from_status TEXT, to_status TEXT NOT NULL, actor_id TEXT NOT NULL, actor_email TEXT, note TEXT, created_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS skill_verification_jobs (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, mode TEXT NOT NULL, status TEXT NOT NULL, requested_by TEXT NOT NULL, requested_email TEXT, source_hash TEXT NOT NULL, verifier_version TEXT NOT NULL, summary TEXT, findings_json TEXT NOT NULL DEFAULT '[]', verification_method TEXT, duration_ms INTEGER, external_job_id TEXT, created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skills_status_category ON skills(status, category)"),
@@ -481,6 +486,8 @@ async function ensureSchema(db: D1Database) {
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_favorites_skill_actor ON skill_favorites(skill_id, actor_id)"),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_skill_favorites_unique ON skill_favorites(skill_id, actor_id)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_favorites_actor ON skill_favorites(actor_id, created_at)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_submissions_status_created ON skill_submissions(status, created_at)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_submissions_actor_created ON skill_submissions(actor_id, created_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_verification_jobs_skill_status ON skill_verification_jobs(skill_id, status, created_at)"),
   ]);
 
@@ -511,6 +518,9 @@ async function ensureSchema(db: D1Database) {
     ["source_link_checked_at", "TEXT"],
     ["source_link_error", "TEXT"],
     ["duplicate_of", "TEXT"],
+    ["summary_review_status", "TEXT NOT NULL DEFAULT 'pending'"],
+    ["summary_reviewed_by", "TEXT"],
+    ["summary_reviewed_at", "TEXT"],
   ];
   for (const [name, definition] of legacyColumns) {
     if (columns.has(name)) continue;
@@ -525,6 +535,7 @@ async function ensureSchema(db: D1Database) {
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skills_verification_status ON skills(verification_status, updated_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_verification_jobs_method ON skill_verification_jobs(verification_method, created_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skills_summary_status ON skills(summary_status, updated_at)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_skills_summary_review_status ON skills(summary_review_status, updated_at)"),
   ]);
 }
 
@@ -573,7 +584,7 @@ async function writeSkills(db: D1Database, candidates: CatalogSkill[], seenAt: s
   for (let index = 0; index < resolved.length; index += 50) await db.batch(resolved.slice(index, index + 50));
   const changed = candidates.filter((skill) => existingHashes.get(skill.id) !== skill.contentHash);
   for (let index = 0; index < changed.length; index += 50) {
-    await db.batch(changed.slice(index, index + 50).map((skill) => db.prepare("UPDATE skills SET summary_ko = NULL, summary_status = 'pending', summary_updated_at = NULL, summary_error = NULL WHERE id = ? AND content_hash = ?").bind(skill.id, skill.contentHash)));
+      await db.batch(changed.slice(index, index + 50).map((skill) => db.prepare("UPDATE skills SET summary_ko = NULL, summary_status = 'pending', summary_updated_at = NULL, summary_error = NULL, summary_review_status = 'pending', summary_reviewed_by = NULL, summary_reviewed_at = NULL WHERE id = ? AND content_hash = ?").bind(skill.id, skill.contentHash)));
   }
 }
 
@@ -688,17 +699,67 @@ export async function processPendingSkillSummaries(env: SyncEnv, maxPerRun = SUM
     try {
       const summaries = await generateSummaryBatch(env.AI, batch);
       const updatedAt = now();
-      await env.DB.batch(batch.map((row) => env.DB!.prepare("UPDATE skills SET summary_ko = ?, summary_status = 'generated', summary_updated_at = ?, summary_error = NULL WHERE id = ? AND content_hash = ?").bind(summaries.get(row.id), updatedAt, row.id, row.content_hash)));
+      await env.DB.batch(batch.map((row) => env.DB!.prepare("UPDATE skills SET summary_ko = ?, summary_status = 'generated', summary_updated_at = ?, summary_error = NULL, summary_review_status = 'pending', summary_reviewed_by = NULL, summary_reviewed_at = NULL WHERE id = ? AND content_hash = ?").bind(summaries.get(row.id), updatedAt, row.id, row.content_hash)));
       processed += batch.length;
     } catch (error) {
       failed += batch.length;
       const message = error instanceof Error ? error.message : "AI 한국어 요약 생성에 실패했습니다.";
-      await env.DB.batch(batch.map((row) => env.DB!.prepare("UPDATE skills SET summary_status = 'failed', summary_error = ? WHERE id = ? AND content_hash = ?").bind(message.slice(0, 500), row.id, row.content_hash)));
+      await env.DB.batch(batch.map((row) => env.DB!.prepare("UPDATE skills SET summary_status = 'failed', summary_error = ?, summary_review_status = 'pending' WHERE id = ? AND content_hash = ?").bind(message.slice(0, 500), row.id, row.content_hash)));
       await recordOpsAlerts(env, [{ kind: "quality_issue", severity: "warning", title: "AI 한국어 요약 생성 실패", message, fingerprint: `summary:failed:${rowFingerprint(batch)}` }]);
     }
   }
   const remainingRow = await env.DB.prepare("SELECT COUNT(*) AS count FROM skills WHERE status = 'active' AND summary_status IN ('pending', 'failed')").first<{ count: number }>();
   return { status: failed > 0 ? "completed_with_errors" : "completed", processed, failed, remaining: Number(remainingRow?.count ?? 0) };
+}
+
+export async function getSummaryMetrics(db: D1Database) {
+  await ensureSchema(db);
+  const [statuses, reviews, oldest, failures] = await Promise.all([
+    db.prepare("SELECT summary_status, COUNT(*) AS count FROM skills WHERE status = 'active' GROUP BY summary_status").all<Record<string, unknown>>(),
+    db.prepare("SELECT summary_review_status, COUNT(*) AS count FROM skills WHERE status = 'active' GROUP BY summary_review_status").all<Record<string, unknown>>(),
+    db.prepare("SELECT MIN(updated_at) AS value FROM skills WHERE status = 'active' AND summary_status IN ('pending', 'failed')").first<{ value: string | null }>(),
+    db.prepare("SELECT id, name, summary_error, updated_at FROM skills WHERE status = 'active' AND summary_status = 'failed' ORDER BY updated_at DESC LIMIT 10").all<Record<string, unknown>>(),
+  ]);
+  const statusCounts: Record<string, number> = {};
+  for (const row of statuses.results ?? []) statusCounts[String(row.summary_status ?? "pending")] = Number(row.count ?? 0);
+  const reviewCounts: Record<string, number> = {};
+  for (const row of reviews.results ?? []) reviewCounts[String(row.summary_review_status ?? "pending")] = Number(row.count ?? 0);
+  return {
+    generated: statusCounts.generated ?? 0,
+    pending: statusCounts.pending ?? 0,
+    failed: statusCounts.failed ?? 0,
+    reviewPending: reviewCounts.pending ?? 0,
+    needsRevision: reviewCounts.needs_revision ?? 0,
+    oldestPendingAt: oldest?.value ?? null,
+    failures: (failures.results ?? []).map((row) => ({ id: String(row.id), name: String(row.name), error: row.summary_error ? String(row.summary_error) : "요약 실패 원인 기록 없음", updatedAt: String(row.updated_at) })),
+  };
+}
+
+export async function retrySkillSummaries(db: D1Database, skillIds: string[] = []) {
+  await ensureSchema(db);
+  const ids = [...new Set(skillIds.map((id) => id.trim()).filter(Boolean))].slice(0, 100);
+  if (ids.length === 0) {
+    const result = await db.prepare("UPDATE skills SET summary_status = 'pending', summary_error = NULL, summary_review_status = 'pending', summary_reviewed_by = NULL, summary_reviewed_at = NULL WHERE status = 'active' AND summary_status = 'failed'").run();
+    return Number(result.meta?.changes ?? 0);
+  }
+  const result = await db.prepare(`UPDATE skills SET summary_status = 'pending', summary_error = NULL, summary_review_status = 'pending', summary_reviewed_by = NULL, summary_reviewed_at = NULL WHERE status = 'active' AND id IN (${ids.map(() => "?").join(",")})`).bind(...ids).run();
+  return Number(result.meta?.changes ?? 0);
+}
+
+export async function reviewSkillSummary(db: D1Database, skillId: string, action: "approve" | "needs_revision", actor: { id: string; email: string | null }) {
+  await ensureSchema(db);
+  const row = await db.prepare("SELECT summary_status, summary_review_status FROM skills WHERE id = ? AND status = 'active'").bind(skillId).first<{ summary_status: string; summary_review_status: string }>();
+  if (!row) throw new Error("Skill을 찾을 수 없습니다.");
+  if (action === "approve" && row.summary_status !== "generated") throw new Error("생성된 요약만 승인할 수 있습니다.");
+  const updatedAt = now();
+  const next = action === "approve" ? "approved" : "needs_revision";
+  await db.batch([
+    db.prepare(action === "approve"
+      ? "UPDATE skills SET summary_review_status = 'approved', summary_reviewed_by = ?, summary_reviewed_at = ? WHERE id = ? AND summary_status = 'generated'"
+      : "UPDATE skills SET summary_ko = NULL, summary_status = 'pending', summary_error = NULL, summary_review_status = 'needs_revision', summary_reviewed_by = ?, summary_reviewed_at = ? WHERE id = ?").bind(actor.id, updatedAt, skillId),
+    db.prepare("INSERT INTO skill_review_events (id, skill_id, action, from_status, to_status, actor_id, actor_email, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), skillId, `summary_${action}`, row.summary_review_status, next, actor.id, actor.email, action === "approve" ? "AI 한국어 요약 승인" : "AI 한국어 요약 재생성 요청", updatedAt),
+  ]);
+  return { skillId, action, status: next, updatedAt };
 }
 
 function rowFingerprint(rows: SummaryRow[]) {
@@ -714,6 +775,10 @@ function rowToSkill(row: Record<string, unknown>): CatalogSkill & { status: stri
     summaryKo: row.summary_ko ? String(row.summary_ko) : null,
     summaryStatus: row.summary_status === "generated" || row.summary_status === "failed" ? row.summary_status : "pending",
     summaryUpdatedAt: row.summary_updated_at ? String(row.summary_updated_at) : null,
+    summaryError: row.summary_error ? String(row.summary_error) : null,
+    summaryReviewStatus: row.summary_review_status === "approved" || row.summary_review_status === "needs_revision" ? row.summary_review_status : "pending",
+    summaryReviewedBy: row.summary_reviewed_by ? String(row.summary_reviewed_by) : null,
+    summaryReviewedAt: row.summary_reviewed_at ? String(row.summary_reviewed_at) : null,
     tags: parseJsonArray(String(row.tags_json ?? "[]")),
     compatibility: parseJsonArray(String(row.compatibility_json ?? "[]")),
     risk: row.risk === "주의" ? "주의" : "낮음",
@@ -752,9 +817,9 @@ export async function listStoredSkills(db: D1Database, search = "", region = "",
   const clauses = ["status = 'active'", "approval_status = 'published'"];
   const args: (string | number)[] = [];
   if (search) {
-    clauses.push("(name LIKE ? OR description LIKE ? OR source LIKE ? OR tags_json LIKE ?)");
+    clauses.push("(name LIKE ? OR description LIKE ? OR summary_ko LIKE ? OR source LIKE ? OR tags_json LIKE ?)");
     const pattern = `%${search}%`;
-    args.push(pattern, pattern, pattern, pattern);
+    args.push(pattern, pattern, pattern, pattern, pattern);
   }
   if (region && (region === "국내" || region === "해외")) {
     clauses.push("region = ?");

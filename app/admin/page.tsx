@@ -25,6 +25,10 @@ type QueueItem = {
   verificationStatus: VerificationStatus;
   verificationUpdatedAt: string | null;
   verificationSummary: string | null;
+  summaryKo: string | null;
+  summaryStatus: "pending" | "generated" | "failed";
+  summaryReviewStatus: "pending" | "approved" | "needs_revision";
+  summaryError?: string | null;
   license: string | null;
   lastSeenAt: string;
   approvalUpdatedAt: string | null;
@@ -65,7 +69,19 @@ type VerificationMetrics = {
   quality?: { open: number; blockers: number; issues: QualityIssue[] };
   usage?: { totalEvents: number; favorites: number; activeUsers: number; topSkills: Array<Record<string, unknown>> };
   alerts?: Array<{ id: string; severity: string; title: string; message: string; created_at: string }>;
+  summary?: SummaryMetrics;
 };
+
+type SummaryMetrics = {
+  generated: number;
+  pending: number;
+  failed: number;
+  reviewPending: number;
+  needsRevision: number;
+  oldestPendingAt: string | null;
+  failures: Array<{ id: string; name: string; error: string; updatedAt: string }>;
+};
+type SkillSubmission = { id: string; actor_email: string | null; name: string; source_url: string; source_type: string; category: string; description: string; install: string; prompt: string; created_at: string };
 
 const tabs: Array<{ key: QueueTab; label: string }> = [
   { key: "review", label: "검토 필요" },
@@ -119,6 +135,7 @@ export default function AdminQueuePage() {
   const [notice, setNotice] = useState("");
   const [metrics, setMetrics] = useState<VerificationMetrics | null>(null);
   const [toolStatus, setToolStatus] = useState("");
+  const [submissions, setSubmissions] = useState<SkillSubmission[]>([]);
   const backupInputRef = useRef<HTMLInputElement>(null);
 
   const loadQueue = useCallback(async (nextTab: QueueTab) => {
@@ -140,10 +157,20 @@ export default function AdminQueuePage() {
   const loadMetrics = useCallback(async () => {
     try {
       const response = await fetch("/api/admin/metrics?days=30", { cache: "no-store" });
-      const payload = await response.json() as { verification?: VerificationMetrics; quality?: VerificationMetrics["quality"]; usage?: VerificationMetrics["usage"]; alerts?: VerificationMetrics["alerts"] };
-      if (response.ok && payload.verification) setMetrics({ ...payload.verification, quality: payload.quality, usage: payload.usage, alerts: payload.alerts });
+      const payload = await response.json() as { verification?: VerificationMetrics; quality?: VerificationMetrics["quality"]; usage?: VerificationMetrics["usage"]; alerts?: VerificationMetrics["alerts"]; summary?: SummaryMetrics };
+      if (response.ok && payload.verification) setMetrics({ ...payload.verification, quality: payload.quality, usage: payload.usage, alerts: payload.alerts, summary: payload.summary });
     } catch {
       // Metrics are informative and should not block queue operations.
+    }
+  }, []);
+
+  const loadSubmissions = useCallback(async () => {
+    try {
+      const response = await fetch("/api/admin/submissions", { cache: "no-store" });
+      const payload = await response.json() as { items?: SkillSubmission[] };
+      if (response.ok) setSubmissions(Array.isArray(payload.items) ? payload.items : []);
+    } catch {
+      // Submission review is optional and should not block the approval queue.
     }
   }, []);
 
@@ -192,14 +219,59 @@ export default function AdminQueuePage() {
     await loadMetrics();
   };
 
+  const retrySummaries = async (skillId?: string) => {
+    setToolStatus("AI 요약 재생성을 요청하는 중...");
+    try {
+      const response = await fetch("/api/admin/summaries", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "retry", ...(skillId ? { skillId } : {}) }) });
+      const payload = await response.json() as { retried?: number; error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "AI 요약 재시도에 실패했습니다.");
+      setToolStatus(`AI 요약 재생성 대기 등록 · ${payload.retried ?? 0}건`);
+      await loadMetrics();
+    } catch (summaryError) {
+      setToolStatus(summaryError instanceof Error ? summaryError.message : "AI 요약 재시도에 실패했습니다.");
+    }
+  };
+
+  const reviewSummary = async (skillId: string, reviewAction: "approve" | "needs_revision") => {
+    setBusyId(skillId);
+    try {
+      const response = await fetch("/api/admin/summaries", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "review", skillId, reviewAction }) });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "요약 검토 처리에 실패했습니다.");
+      setNotice(reviewAction === "approve" ? "AI 요약을 승인했습니다." : "AI 요약 재생성을 요청했습니다.");
+      await loadQueue(tab);
+      await loadMetrics();
+    } catch (summaryError) {
+      setError(summaryError instanceof Error ? summaryError.message : "요약 검토 처리에 실패했습니다.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const reviewSubmission = async (submissionId: string, action: "approve" | "reject") => {
+    setBusyId(submissionId);
+    try {
+      const response = await fetch("/api/admin/submissions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ submissionId, action }) });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "제출 처리에 실패했습니다.");
+      setNotice(action === "approve" ? "제출을 검증 큐로 이동했습니다." : "제출을 반려했습니다.");
+      await loadSubmissions();
+      await loadQueue(tab);
+    } catch (submissionError) {
+      setError(submissionError instanceof Error ? submissionError.message : "제출 처리에 실패했습니다.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   useEffect(() => {
-    const timer = window.setTimeout(() => { void loadQueue(tab); void loadMetrics(); }, 0);
-    const poller = window.setInterval(() => { void loadQueue(tab); void loadMetrics(); }, 10000);
+    const timer = window.setTimeout(() => { void loadQueue(tab); void loadMetrics(); void loadSubmissions(); }, 0);
+    const poller = window.setInterval(() => { void loadQueue(tab); void loadMetrics(); void loadSubmissions(); }, 10000);
     return () => {
       window.clearTimeout(timer);
       window.clearInterval(poller);
     };
-  }, [loadMetrics, loadQueue, tab]);
+  }, [loadMetrics, loadQueue, loadSubmissions, tab]);
 
   const changeStatus = async (skillId: string, action: ReviewAction) => {
     setBusyId(skillId);
@@ -248,7 +320,7 @@ export default function AdminQueuePage() {
     <main className="admin-shell">
       <header className="admin-topbar">
         <Link prefetch={false} className="brand" href="/" aria-label="skillbase 홈"><span className="brand-mark">s<span>·</span></span><span>skillbase</span></Link>
-        <div className="admin-header-actions"><button className="admin-tool-button" onClick={() => void runBackupTest()}>복구 테스트</button><button className="admin-tool-button" onClick={() => backupInputRef.current?.click()}>백업 파일 검사</button><input ref={backupInputRef} type="file" accept="application/json,.json" hidden onChange={(event) => void testBackupFile(event)} /><button className="admin-tool-button" onClick={() => void runQualityCheck()}>품질 점검</button><a className="admin-export" href="/api/admin/export">데이터 백업 ↓</a><Link prefetch={false} className="admin-back" href="/">카탈로그로 돌아가기 ↗</Link></div>
+        <div className="admin-header-actions"><button className="admin-tool-button" onClick={() => void runBackupTest()}>복구 테스트</button><button className="admin-tool-button" onClick={() => backupInputRef.current?.click()}>백업 파일 검사</button><input ref={backupInputRef} type="file" accept="application/json,.json" hidden onChange={(event) => void testBackupFile(event)} /><button className="admin-tool-button" onClick={() => void runQualityCheck()}>품질 점검</button>{metrics?.summary?.failed ? <button className="admin-tool-button" onClick={() => void retrySummaries()}>요약 실패 재시도 {metrics.summary.failed}</button> : null}<a className="admin-export" href="/api/admin/export">데이터 백업 ↓</a><Link prefetch={false} className="admin-back" href="/">카탈로그로 돌아가기 ↗</Link></div>
       </header>
 
       <section className="admin-hero">
@@ -269,6 +341,7 @@ export default function AdminQueuePage() {
           {metrics.averageDurationMs != null && <span>평균 {Math.round(metrics.averageDurationMs / 1000)}초</span>}
           {metrics.quality && <span>품질 이슈 {metrics.quality.open}건 · 차단 {metrics.quality.blockers}건</span>}
           {metrics.usage && <span>최근 사용 이벤트 {metrics.usage.totalEvents}건 · 즐겨찾기 {metrics.usage.favorites}건</span>}
+          {metrics.summary && <span>AI 요약 생성 {metrics.summary.generated}건 · 대기 {metrics.summary.pending}건 · 실패 {metrics.summary.failed}건 · 검토 {metrics.summary.reviewPending}건</span>}
         </div>}
       </section>
 
@@ -285,6 +358,7 @@ export default function AdminQueuePage() {
         {toolStatus && <p className="admin-notice">{toolStatus}</p>}
         {error && <div className="admin-error"><strong>접근 또는 처리 오류</strong><span>{error}</span></div>}
         {metrics?.alerts && metrics.alerts.length > 0 && <div className="admin-alert-list"><strong>미해결 운영 알림 {metrics.alerts.length}건</strong>{metrics.alerts.map((alert) => <div className="admin-alert" key={alert.id}><span><b>{alert.title}</b> · {alert.message}</span><button onClick={() => void resolveAlert(alert.id)}>확인 처리</button></div>)}</div>}
+        {submissions.length > 0 && <div className="admin-submission-list"><div><strong>사용자 제출 검토 {submissions.length}건</strong><span>승인하면 바로 공개하지 않고 검증 큐로 이동합니다.</span></div>{submissions.map((submission) => <article className="admin-submission" key={submission.id}><div><h3>{submission.name}</h3><p>{submission.category} · {submission.source_type} · {submission.actor_email ?? "익명 제출"}</p><p>{submission.description}</p><a href={submission.source_url} target="_blank" rel="noreferrer">원본 보기 ↗</a></div><div className="admin-quality-actions"><button className="action-primary" disabled={busyId === submission.id} onClick={() => void reviewSubmission(submission.id, "approve")}>검증 큐로 이동</button><button className="action-danger" disabled={busyId === submission.id} onClick={() => void reviewSubmission(submission.id, "reject")}>반려</button></div></article>)}</div>}
         {metrics?.quality && metrics.quality.issues.length > 0 && <div className="admin-quality-list">
           <div><strong>품질 검토 필요 {metrics.quality.open}건</strong><span>자동 삭제하지 않습니다. 대표 Skill을 확인한 뒤 중복 공개만 수동 해제하세요.</span></div>
           {metrics.quality.issues.map((issue) => <div className="admin-quality-item" key={issue.id}>
@@ -313,6 +387,7 @@ export default function AdminQueuePage() {
                   <a className="review-source" href={skill.sourceUrl} target="_blank" rel="noreferrer">원본 보기 ↗</a>
                 </div>
                 <p className="review-description">{skill.description}</p>
+                {skill.summaryKo && <div className="summary-review-box"><div><strong>AI 한국어 요약</strong><span className={`summary-review-pill summary-review-${skill.summaryReviewStatus}`}>{skill.summaryReviewStatus === "approved" ? "승인됨" : skill.summaryReviewStatus === "needs_revision" ? "재생성 대기" : "검토 필요"}</span></div><p>{skill.summaryKo}</p>{skill.summaryStatus === "failed" && skill.summaryError && <small>생성 오류: {skill.summaryError}</small>}<div className="summary-review-actions">{skill.summaryReviewStatus === "pending" && skill.summaryStatus === "generated" && <><button className="action-primary" disabled={busyId === skill.id} onClick={() => void reviewSummary(skill.id, "approve")}>요약 승인</button><button className="action-secondary" disabled={busyId === skill.id} onClick={() => void reviewSummary(skill.id, "needs_revision")}>재생성 요청</button></>}{skill.summaryStatus === "failed" && <button className="action-secondary" disabled={busyId === skill.id} onClick={() => void retrySummaries(skill.id)}>다시 생성</button>}</div></div>}
                 <div className="review-meta"><span>출처: {skill.source}</span><span>발견 경로: {skill.discoveredVia}</span><span>위험도: {skill.risk}</span><span>라이선스: {skill.license ?? "미상"}{skill.licensePrevious && " · 변경 감지"}</span><span>원본 링크: {skill.sourceLinkStatus === "ok" ? "정상" : skill.sourceLinkStatus === "broken" ? "깨짐" : "미확인"}</span>{skill.duplicateOf && <span>중복 대표: {skill.duplicateOf.slice(0, 10)}</span>}<span>해시: {skill.contentHash.slice(0, 10)}</span><span>최근 확인: {formatDate(skill.lastSeenAt)}</span><span>검증: {formatDate(skill.verificationUpdatedAt)}</span></div>
                 {skill.verificationSummary && <p className="verification-summary">{skill.verificationSummary}</p>}
                 <div className="review-actions">

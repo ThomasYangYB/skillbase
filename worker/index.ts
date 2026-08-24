@@ -62,6 +62,9 @@ const worker = {
     secured.headers.set("referrer-policy", "strict-origin-when-cross-origin");
     secured.headers.set("permissions-policy", "camera=(), microphone=(), geolocation=()");
     secured.headers.set("x-frame-options", "DENY");
+    secured.headers.set("x-permitted-cross-domain-policies", "none");
+    secured.headers.set("cross-origin-opener-policy", "same-origin");
+    if (url.protocol === "https:") secured.headers.set("strict-transport-security", "max-age=31536000; includeSubDomains");
     return secured;
   },
 

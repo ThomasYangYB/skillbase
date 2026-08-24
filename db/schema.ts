@@ -9,6 +9,9 @@ export const skills = sqliteTable("skills", {
   summaryStatus: text("summary_status").notNull().default("pending"),
   summaryUpdatedAt: text("summary_updated_at"),
   summaryError: text("summary_error"),
+  summaryReviewStatus: text("summary_review_status").notNull().default("pending"),
+  summaryReviewedBy: text("summary_reviewed_by"),
+  summaryReviewedAt: text("summary_reviewed_at"),
   category: text("category").notNull(),
   region: text("region").notNull(),
   source: text("source").notNull(),
@@ -168,4 +171,25 @@ export const skillFavorites = sqliteTable("skill_favorites", {
 }, (table) => ({
   skillActorIdx: index("idx_skill_favorites_skill_actor").on(table.skillId, table.actorId),
   actorIdx: index("idx_skill_favorites_actor").on(table.actorId, table.createdAt),
+}));
+
+export const skillSubmissions = sqliteTable("skill_submissions", {
+  id: text("id").primaryKey(),
+  actorId: text("actor_id"),
+  actorEmail: text("actor_email"),
+  name: text("name").notNull(),
+  sourceUrl: text("source_url").notNull(),
+  sourceType: text("source_type").notNull(),
+  category: text("category").notNull(),
+  description: text("description").notNull(),
+  install: text("install").notNull(),
+  prompt: text("prompt").notNull(),
+  status: text("status").notNull().default("pending"),
+  reviewerId: text("reviewer_id"),
+  reviewNote: text("review_note"),
+  createdAt: text("created_at").notNull(),
+  reviewedAt: text("reviewed_at"),
+}, (table) => ({
+  statusIdx: index("idx_skill_submissions_status_created").on(table.status, table.createdAt),
+  actorIdx: index("idx_skill_submissions_actor_created").on(table.actorId, table.createdAt),
 }));

@@ -437,6 +437,21 @@ type SortMode = "추천순" | "최신순" | "이름순";
 type CollectionMode = "전체" | "즐겨찾기" | "최근 본";
 type SourceTypeFilter = "전체" | "공식" | "커뮤니티" | "디렉터리";
 
+const searchAliases: Array<[string[], string[]]> = [
+  [["개발", "프로그래밍", "코딩"], ["개발", "code", "programming", "coding"]],
+  [["디자인", "ui", "ux"], ["디자인", "design", "ui", "ux"]],
+  [["문서", "서류", "사무"], ["문서", "document", "office", "writing"]],
+  [["자동화", "워크플로", "workflow"], ["자동화", "automation", "workflow"]],
+  [["번역", "translate", "translation"], ["번역", "translate", "translation"]],
+  [["검색", "리서치", "조사"], ["검색", "research", "search"]],
+];
+
+function expandSearchQuery(query: string) {
+  const normalized = query.toLowerCase();
+  const aliases = searchAliases.find(([keys]) => keys.some((key) => normalized.includes(key)));
+  return aliases ? [...new Set([normalized, ...aliases[1]])] : [normalized];
+}
+
 function CheckIcon() {
   return <span className="check-icon" aria-hidden="true">✓</span>;
 }
@@ -453,6 +468,8 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
+  const [compareIds, setCompareIds] = useState<string[]>([]);
+  const [compareOpen, setCompareOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [verified, setVerified] = useState(false);
   const [promptDraft, setPromptDraft] = useState("");
@@ -465,6 +482,9 @@ export default function Home() {
   const [recentIds, setRecentIds] = useState<string[]>([]);
   const [personalUsage, setPersonalUsage] = useState<{ events?: Record<string, number>; favorites?: number } | null>(null);
   const [favoriteStatus, setFavoriteStatus] = useState("");
+  const [submitOpen, setSubmitOpen] = useState(false);
+  const [submissionStatus, setSubmissionStatus] = useState("");
+  const [submissionForm, setSubmissionForm] = useState({ name: "", sourceUrl: "", sourceType: "커뮤니티", category: "개발·IT", description: "", install: "", prompt: "" });
   const [syncSummary, setSyncSummary] = useState<{ activeSkills: number; pendingReviews: number; latestRun?: { status?: string; finished_at?: string | null }; sources: unknown[] } | null>(null);
 
   useEffect(() => {
@@ -528,6 +548,7 @@ export default function Home() {
 
   const filteredSkills = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
+    const searchTerms = normalizedQuery ? expandSearchQuery(normalizedQuery) : [];
     const filtered = catalogSkills.filter((skill) => {
       const matchesCategory = activeCategory === "전체" || skill.category === activeCategory;
       const matchesRegion = activeRegion === "전체" || skill.region === activeRegion;
@@ -539,8 +560,8 @@ export default function Home() {
         || activeVerification === "검증됨" && ["sandbox_passed", "static_passed", "legacy"].includes(verification)
         || activeVerification === "fallback" && verification === "sandbox_fallback_passed"
         || activeVerification === "검토 필요" && ["unverified", "static_warning", "static_blocked", "sandbox_failed", "sandbox_unavailable"].includes(verification);
-      const searchable = [skill.name, skill.category, skill.description, skill.source, skill.region, ...skill.tags, ...skill.compatibility].join(" ").toLowerCase();
-      return matchesCategory && matchesRegion && matchesSourceType && matchesPlatform && matchesCollection && matchesVerification && (!normalizedQuery || searchable.includes(normalizedQuery));
+      const searchable = [skill.name, skill.category, skill.description, skill.summaryKo ?? "", skill.source, skill.region, ...skill.tags, ...skill.compatibility].join(" ").toLowerCase();
+      return matchesCategory && matchesRegion && matchesSourceType && matchesPlatform && matchesCollection && matchesVerification && (!normalizedQuery || searchTerms.some((term) => searchable.includes(term)));
     });
     return [...filtered].sort((left, right) => {
       if (sortMode === "이름순") return left.name.localeCompare(right.name);
@@ -571,6 +592,10 @@ export default function Home() {
     setFeedbackStatus("");
     setFavoriteStatus("");
     void trackUsage(skill.id, "view");
+  };
+
+  const toggleCompare = (skillId: string) => {
+    setCompareIds((current) => current.includes(skillId) ? current.filter((id) => id !== skillId) : current.length >= 3 ? current : [...current, skillId]);
   };
 
   const trackUsage = async (skillId: string, event: "view" | "copy" | "open" | "install_verify") => {
@@ -640,6 +665,19 @@ export default function Home() {
       setReportMessage("");
     } catch (error) {
       setFeedbackStatus(error instanceof Error ? error.message : "신고를 전송하지 못했습니다.");
+    }
+  };
+
+  const submitSkill = async () => {
+    setSubmissionStatus("제출 중...");
+    try {
+      const response = await fetch("/api/submissions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(submissionForm) });
+      const payload = await response.json() as { error?: string; message?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Skill 제출에 실패했습니다.");
+      setSubmissionStatus(payload.message ?? "제출이 접수되었습니다.");
+      setSubmissionForm({ name: "", sourceUrl: "", sourceType: "커뮤니티", category: "개발·IT", description: "", install: "", prompt: "" });
+    } catch (error) {
+      setSubmissionStatus(error instanceof Error ? error.message : "Skill 제출에 실패했습니다.");
     }
   };
 
@@ -796,7 +834,7 @@ export default function Home() {
                   </div>
                   <div className="card-footer">
                     <span className={`risk risk-${skill.risk === "낮음" ? "low" : "medium"}`}><span />권한 위험도 {skill.risk}</span>
-                    <div className="card-actions"><button className="view-button" onClick={() => openSkill(skill)}>빠른 보기</button><a className="detail-link" href={`/skills/${skill.id}`}>상세 페이지 ↗</a></div>
+                    <div className="card-actions"><button className="view-button" onClick={() => openSkill(skill)}>빠른 보기</button><button className={`compare-button ${compareIds.includes(skill.id) ? "selected" : ""}`} onClick={() => toggleCompare(skill.id)} aria-label={`${skill.name} 비교 ${compareIds.includes(skill.id) ? "해제" : "추가"}`}>{compareIds.includes(skill.id) ? "비교됨" : "비교"}</button><a className="detail-link" href={`/skills/${skill.id}`}>상세 페이지 ↗</a></div>
                   </div>
                 </article>
               ))}
@@ -809,12 +847,18 @@ export default function Home() {
         </div>
       </section>
 
+      {compareIds.length > 0 && <div className="compare-bar"><span><strong>{compareIds.length}</strong>개 Skill 선택됨{compareIds.length < 2 && " · 2개부터 비교 가능"}</span><div>{compareIds.map((id) => { const item = catalogSkills.find((skill) => skill.id === id); return item ? <button key={id} onClick={() => toggleCompare(id)}>{item.name} ×</button> : null; })}<button className="compare-open" disabled={compareIds.length < 2} onClick={() => setCompareOpen(true)}>비교 보기</button></div></div>}
+
       <section className="submit-banner" id="submit">
         <div><span className="banner-icon">+</span><div><p className="section-kicker">BUILD THE LIBRARY</p><h2>직접 만든 Skill도 등록하세요.</h2></div></div>
-        <span className="submit-coming-soon">제출 기능 준비 중</span>
+        <button className="submit-coming-soon" onClick={() => { setSubmitOpen(true); setSubmissionStatus(""); }}>Skill 제출하기</button>
       </section>
 
       <footer className="footer"><Link className="brand" href="/" aria-label="skillbase 홈"><span className="brand-mark">s<span>·</span></span><span>skillbase</span></Link><span>AI Skills를 더 안전하고 쉽게.</span><span>© 2026 skillbase</span></footer>
+
+      {compareOpen && <div className="modal-backdrop" role="presentation"><section className="skill-modal compare-modal" role="dialog" aria-modal="true" aria-labelledby="compare-title"><button className="modal-close" onClick={() => setCompareOpen(false)} aria-label="비교 창 닫기">×</button><p className="section-kicker">SKILL COMPARISON</p><h2 id="compare-title">선택한 Skill 비교</h2><div className="compare-table-wrap"><table className="compare-table"><thead><tr><th>항목</th>{compareIds.map((id) => { const item = catalogSkills.find((skill) => skill.id === id); return <th key={id}>{item?.name}</th>; })}</tr></thead><tbody><tr><th>카테고리</th>{compareIds.map((id) => <td key={id}>{catalogSkills.find((skill) => skill.id === id)?.category}</td>)}</tr><tr><th>한국어 요약</th>{compareIds.map((id) => <td key={id}>{getSkillSummary(catalogSkills.find((skill) => skill.id === id) ?? skills[0])}</td>)}</tr><tr><th>호환 플랫폼</th>{compareIds.map((id) => <td key={id}>{catalogSkills.find((skill) => skill.id === id)?.compatibility.join(" · ")}</td>)}</tr><tr><th>권한 위험도</th>{compareIds.map((id) => <td key={id}>{catalogSkills.find((skill) => skill.id === id)?.risk}</td>)}</tr><tr><th>검증 상태</th>{compareIds.map((id) => <td key={id}>{catalogSkills.find((skill) => skill.id === id)?.verificationStatus ?? "기존 원본 확인"}</td>)}</tr><tr><th>설치 명령어</th>{compareIds.map((id) => <td key={id}><code>{catalogSkills.find((skill) => skill.id === id)?.install}</code></td>)}</tr></tbody></table></div><button className="secondary-button" onClick={() => setCompareOpen(false)}>닫기</button></section></div>}
+
+      {submitOpen && <div className="modal-backdrop" role="presentation"><section className="skill-modal submission-modal" role="dialog" aria-modal="true" aria-labelledby="submission-title"><button className="modal-close" onClick={() => setSubmitOpen(false)} aria-label="제출 창 닫기">×</button><div className="modal-heading"><div className="skill-logo violet">＋</div><div><p className="section-kicker">BUILD THE LIBRARY</p><h2 id="submission-title">Skill 제출</h2><p>제출 후 운영자가 원본·설치·권한을 확인한 뒤 검증 큐로 이동합니다.</p></div></div><div className="submission-grid"><label>Skill 이름<input value={submissionForm.name} onChange={(event) => setSubmissionForm((current) => ({ ...current, name: event.target.value }))} placeholder="예: frontend-design" /></label><label>원본 URL<input type="url" value={submissionForm.sourceUrl} onChange={(event) => setSubmissionForm((current) => ({ ...current, sourceUrl: event.target.value }))} placeholder="https://github.com/..." /></label><label>출처 유형<select value={submissionForm.sourceType} onChange={(event) => setSubmissionForm((current) => ({ ...current, sourceType: event.target.value }))}><option>공식</option><option>커뮤니티</option><option>디렉터리</option></select></label><label>카테고리<select value={submissionForm.category} onChange={(event) => setSubmissionForm((current) => ({ ...current, category: event.target.value }))}>{categoryNames.filter((category) => category !== "전체").map((category) => <option key={category}>{category}</option>)}</select></label><label className="submission-wide">설명<textarea value={submissionForm.description} onChange={(event) => setSubmissionForm((current) => ({ ...current, description: event.target.value }))} placeholder="이 Skill이 해결하는 문제와 주요 기능을 설명하세요." /></label><label>설치 명령어<input value={submissionForm.install} onChange={(event) => setSubmissionForm((current) => ({ ...current, install: event.target.value }))} placeholder="npx skills add ..." /></label><label>프롬프트<textarea value={submissionForm.prompt} onChange={(event) => setSubmissionForm((current) => ({ ...current, prompt: event.target.value }))} placeholder="사용자가 실행할 기본 프롬프트" /></label></div><div className="prompt-actions"><button className="secondary-button" onClick={() => setSubmitOpen(false)}>취소</button><button className="primary-button" onClick={() => void submitSkill()}>검토 요청</button></div>{submissionStatus && <p className="execution-status" role="status">{submissionStatus}</p>}</section></div>}
 
       {selectedSkill && (
         <div className="modal-backdrop" role="presentation">

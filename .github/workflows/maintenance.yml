@@ -24,12 +24,19 @@ jobs:
         run: npm ci
       - name: Audit site dependencies
         run: npm audit --audit-level=high
+      - name: Validate site build and tests
+        run: |
+          npm run lint
+          npm test
       - name: Install adapter dependencies
         working-directory: sandbox-adapter
         run: npm ci
       - name: Audit adapter dependencies
         working-directory: sandbox-adapter
         run: npm audit --audit-level=high
+      - name: Run adapter tests
+        working-directory: sandbox-adapter
+        run: npm test
 
   skills-cli-drift:
     name: Detect Skills CLI updates

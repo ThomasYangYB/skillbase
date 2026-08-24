@@ -71,6 +71,15 @@ export default function SkillDetailClient({ skillId }: { skillId: string }) {
       window.open(skill.appUrl, "_blank", "noopener,noreferrer");
     }
   };
+  const shareSkill = async () => {
+    const shareData = { title: `${skill.name} · skillbase`, text: skill.summaryKo ?? skill.description, url: window.location.href };
+    try {
+      if (navigator.share) await navigator.share(shareData);
+      else { await navigator.clipboard.writeText(window.location.href); setStatus("상세 페이지 링크를 복사했습니다."); }
+    } catch {
+      // A cancelled native share is not an error to surface.
+    }
+  };
 
   return (
     <main className="detail-shell">
@@ -86,7 +95,7 @@ export default function SkillDetailClient({ skillId }: { skillId: string }) {
         <section className="verification-panel"><div><strong>검증 정보</strong><span>{verificationLabel(skill.verificationStatus)}</span></div><p>{skill.verificationSummary ?? "검증 상세 요약이 아직 기록되지 않았습니다. 원본과 권한을 직접 확인하세요."}</p><dl><div><dt>원본 링크</dt><dd>{skill.sourceLinkStatus === "ok" ? "정상 응답" : skill.sourceLinkStatus === "broken" ? "확인 필요" : "최근 점검 정보 없음"}</dd></div><div><dt>최근 검증</dt><dd>{skill.verificationUpdatedAt ?? "기록 없음"}</dd></div><div><dt>최근 업데이트</dt><dd>{skill.updatedAt ?? "기록 없음"}</dd></div></dl>{skill.licensePrevious && <p className="detail-warning">라이선스 변경 감지: {skill.licensePrevious} → {skill.license ?? "미상"}</p>}</section>
         <p className="detail-safety">자동 붙여넣기나 실행은 브라우저 보안상 외부 앱에 직접 전송하지 않습니다. 복사된 프롬프트를 확인한 뒤 사용자가 직접 붙여넣으세요.</p>
         {status && <p className="detail-status" role="status">{status}</p>}
-        <div className="detail-footer-links"><Link href="/">다른 Skill 탐색하기 →</Link><a href={skill.sourceUrl} target="_blank" rel="noreferrer">원본 저장소 확인 ↗</a></div>
+        <div className="detail-footer-links"><Link href="/">다른 Skill 탐색하기 →</Link><button className="detail-share" onClick={() => void shareSkill()}>링크 공유</button><a href={skill.sourceUrl} target="_blank" rel="noreferrer">원본 저장소 확인 ↗</a></div>
       </article>
     </main>
   );
