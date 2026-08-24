@@ -1,5 +1,6 @@
 import { runtimeEnv } from "../../../lib/runtime-env";
 import { getSyncStatus, syncAllSources } from "../../../lib/sync";
+import { recordOpsAlerts } from "../../../lib/alerts";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,7 @@ export async function POST(request: Request) {
     const result = await syncAllSources(runtimeEnv);
     return Response.json(result, { status: result.status === "completed" ? 200 : 207 });
   } catch (error) {
+    await recordOpsAlerts(runtimeEnv, [{ kind: "sync_failure", severity: "critical", title: "수동 수집 작업 실패", message: error instanceof Error ? error.message : "동기화에 실패했습니다.", fingerprint: "sync:manual-exception" }]);
     return Response.json({ error: error instanceof Error ? error.message : "동기화에 실패했습니다." }, { status: 500 });
   }
 }

@@ -3,6 +3,14 @@ import { runtimeEnv } from "../../../lib/runtime-env";
 
 export const dynamic = "force-dynamic";
 
+async function rateKey(request: Request, userId: string | null) {
+  if (userId) return `user:${userId}`;
+  const ip = request.headers.get("cf-connecting-ip") ?? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const agent = request.headers.get("user-agent") ?? "unknown";
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${ip}|${agent}`));
+  return `anon:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("").slice(0, 32)}`;
+}
+
 export async function POST(request: Request) {
   if (!runtimeEnv.DB) return Response.json({ error: "D1 is not configured" }, { status: 503 });
   const raw = await request.text();
@@ -17,7 +25,15 @@ export async function POST(request: Request) {
     if (message && message.length > 1000) return Response.json({ error: "피드백은 1000자 이내로 입력하세요." }, { status: 400 });
     const skill = await getStoredSkillRecord(runtimeEnv.DB, skillId);
     if (!skill || skill.status !== "active" || skill.approval_status !== "published") return Response.json({ error: "공개된 Skill만 피드백을 남길 수 있습니다." }, { status: 404 });
-    await runtimeEnv.DB.prepare("INSERT INTO skill_feedback (id, skill_id, type, message, actor_id, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), skillId, type, message, request.headers.get("oai-authenticated-user-id"), new Date().toISOString()).run();
+    const actorId = request.headers.get("oai-authenticated-user-id");
+    const key = await rateKey(request, actorId);
+    const recent = await runtimeEnv.DB.prepare("SELECT COUNT(*) AS count FROM skill_feedback WHERE actor_id = ? AND created_at >= datetime('now', '-1 hour')").bind(key).first<{ count: number }>();
+    if (Number(recent?.count ?? 0) >= 5) return Response.json({ error: "피드백은 한 시간에 5건까지 보낼 수 있습니다." }, { status: 429, headers: { "retry-after": "3600" } });
+    if (type === "report" && message) {
+      const duplicate = await runtimeEnv.DB.prepare("SELECT id FROM skill_feedback WHERE skill_id = ? AND actor_id = ? AND type = 'report' AND message = ? AND created_at >= datetime('now', '-1 day') LIMIT 1").bind(skillId, key, message).first<{ id: string }>();
+      if (duplicate) return Response.json({ error: "같은 신고가 이미 접수되었습니다." }, { status: 409 });
+    }
+    await runtimeEnv.DB.prepare("INSERT INTO skill_feedback (id, skill_id, type, message, actor_id, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), skillId, type, message, key, new Date().toISOString()).run();
     return Response.json({ ok: true }, { status: 201 });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "피드백을 저장하지 못했습니다." }, { status: 400 });

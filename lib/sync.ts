@@ -1,3 +1,6 @@
+import { recordOpsAlerts } from "./alerts";
+import { runQualityChecks } from "./quality";
+
 type SourceKind = "github" | "skills-sh" | "directory";
 type Region = "국내" | "해외";
 type SourceType = "공식" | "커뮤니티" | "디렉터리";
@@ -9,6 +12,7 @@ export type VerificationStatus = "unverified" | "legacy" | "static_passed" | "st
 export type SyncEnv = {
   DB?: D1Database;
   GITHUB_TOKEN?: string;
+  SKILLBASE_ALERT_WEBHOOK_URL?: string;
 };
 
 export type CatalogSkill = {
@@ -33,6 +37,9 @@ export type CatalogSkill = {
   sourceUpdatedAt?: string | null;
   approvalStatus?: ApprovalStatus;
   verificationStatus?: VerificationStatus;
+  usageCount?: number;
+  favoriteCount?: number;
+  qualityIssueCount?: number;
 };
 
 type SyncSource = {
@@ -442,10 +449,14 @@ async function collectDirectory(source: SyncSource, env: SyncEnv): Promise<Colle
 
 async function ensureSchema(db: D1Database) {
   await db.batch([
-    db.prepare("CREATE TABLE IF NOT EXISTS skills (id TEXT PRIMARY KEY, source_id TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, region TEXT NOT NULL, source TEXT NOT NULL, source_url TEXT NOT NULL, source_type TEXT NOT NULL, compatibility_json TEXT NOT NULL DEFAULT '[]', tags_json TEXT NOT NULL DEFAULT '[]', install TEXT NOT NULL, prompt TEXT NOT NULL, app_url TEXT NOT NULL, risk TEXT NOT NULL, trust TEXT NOT NULL, license TEXT, content_hash TEXT NOT NULL, discovered_via TEXT NOT NULL, source_updated_at TEXT, last_seen_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', approval_status TEXT NOT NULL DEFAULT 'review', approval_updated_at TEXT, approved_by TEXT, published_at TEXT, verification_status TEXT NOT NULL DEFAULT 'unverified', verification_updated_at TEXT, verification_summary TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS skills (id TEXT PRIMARY KEY, source_id TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, region TEXT NOT NULL, source TEXT NOT NULL, source_url TEXT NOT NULL, source_type TEXT NOT NULL, compatibility_json TEXT NOT NULL DEFAULT '[]', tags_json TEXT NOT NULL DEFAULT '[]', install TEXT NOT NULL, prompt TEXT NOT NULL, app_url TEXT NOT NULL, risk TEXT NOT NULL, trust TEXT NOT NULL, license TEXT, license_previous TEXT, license_changed_at TEXT, content_hash TEXT NOT NULL, discovered_via TEXT NOT NULL, source_updated_at TEXT, last_seen_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', approval_status TEXT NOT NULL DEFAULT 'review', approval_updated_at TEXT, approved_by TEXT, published_at TEXT, verification_status TEXT NOT NULL DEFAULT 'unverified', verification_updated_at TEXT, verification_summary TEXT, source_link_status TEXT NOT NULL DEFAULT 'unknown', source_link_checked_at TEXT, source_link_error TEXT, duplicate_of TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS sync_sources (id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, url TEXT NOT NULL, region TEXT NOT NULL, source_type TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, last_synced_at TEXT, last_error TEXT)"),
     db.prepare("CREATE TABLE IF NOT EXISTS sync_runs (id TEXT PRIMARY KEY, started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL, sources_scanned INTEGER NOT NULL DEFAULT 0, candidates_seen INTEGER NOT NULL DEFAULT 0, accepted INTEGER NOT NULL DEFAULT 0, rejected INTEGER NOT NULL DEFAULT 0, error_summary TEXT)"),
     db.prepare("CREATE TABLE IF NOT EXISTS skill_feedback (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, type TEXT NOT NULL, message TEXT, actor_id TEXT, created_at TEXT NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS ops_alerts (id TEXT PRIMARY KEY, kind TEXT NOT NULL, severity TEXT NOT NULL, title TEXT NOT NULL, message TEXT NOT NULL, fingerprint TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', created_at TEXT NOT NULL, resolved_at TEXT)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS skill_quality_issues (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, kind TEXT NOT NULL, severity TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', message TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}', checked_at TEXT NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS skill_usage_events (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, event_type TEXT NOT NULL, actor_id TEXT, created_at TEXT NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS skill_favorites (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, actor_id TEXT NOT NULL, created_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS skill_review_events (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, action TEXT NOT NULL, from_status TEXT, to_status TEXT NOT NULL, actor_id TEXT NOT NULL, actor_email TEXT, note TEXT, created_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS skill_verification_jobs (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, mode TEXT NOT NULL, status TEXT NOT NULL, requested_by TEXT NOT NULL, requested_email TEXT, source_hash TEXT NOT NULL, verifier_version TEXT NOT NULL, summary TEXT, findings_json TEXT NOT NULL DEFAULT '[]', verification_method TEXT, duration_ms INTEGER, external_job_id TEXT, created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skills_status_category ON skills(status, category)"),
@@ -453,6 +464,15 @@ async function ensureSchema(db: D1Database) {
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skills_last_seen ON skills(last_seen_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_review_events_skill ON skill_review_events(skill_id, created_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_feedback_skill ON skill_feedback(skill_id, created_at)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_ops_alerts_status_created ON ops_alerts(status, created_at)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_ops_alerts_fingerprint ON ops_alerts(fingerprint, created_at)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_quality_skill_kind ON skill_quality_issues(skill_id, kind)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_quality_status ON skill_quality_issues(status, severity)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_usage_skill_event ON skill_usage_events(skill_id, event_type, created_at)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_usage_actor ON skill_usage_events(actor_id, created_at)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_favorites_skill_actor ON skill_favorites(skill_id, actor_id)"),
+    db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_skill_favorites_unique ON skill_favorites(skill_id, actor_id)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_favorites_actor ON skill_favorites(actor_id, created_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_skill_verification_jobs_skill_status ON skill_verification_jobs(skill_id, status, created_at)"),
   ]);
 
@@ -477,6 +497,12 @@ async function ensureSchema(db: D1Database) {
     ["verification_status", "TEXT NOT NULL DEFAULT 'legacy'"],
     ["verification_updated_at", "TEXT"],
     ["verification_summary", "TEXT"],
+    ["license_previous", "TEXT"],
+    ["license_changed_at", "TEXT"],
+    ["source_link_status", "TEXT NOT NULL DEFAULT 'unknown'"],
+    ["source_link_checked_at", "TEXT"],
+    ["source_link_error", "TEXT"],
+    ["duplicate_of", "TEXT"],
   ];
   for (const [name, definition] of legacyColumns) {
     if (columns.has(name)) continue;
@@ -499,7 +525,7 @@ async function writeSources(db: D1Database) {
 
 async function writeSkills(db: D1Database, candidates: CatalogSkill[], seenAt: string) {
   const statements = candidates.map(async (skill) => {
-    return db.prepare("INSERT INTO skills (id, source_id, name, description, category, region, source, source_url, source_type, compatibility_json, tags_json, install, prompt, app_url, risk, trust, license, content_hash, discovered_via, source_updated_at, last_seen_at, status, approval_status, approval_updated_at, approved_by, published_at, verification_status, verification_updated_at, verification_summary, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 'review', ?, NULL, NULL, 'unverified', NULL, NULL, ?, ?) ON CONFLICT(id) DO UPDATE SET source_id = excluded.source_id, name = excluded.name, description = excluded.description, category = excluded.category, region = excluded.region, source = excluded.source, source_url = excluded.source_url, source_type = excluded.source_type, compatibility_json = excluded.compatibility_json, tags_json = excluded.tags_json, install = excluded.install, prompt = excluded.prompt, app_url = excluded.app_url, risk = excluded.risk, trust = excluded.trust, license = excluded.license, content_hash = excluded.content_hash, discovered_via = excluded.discovered_via, source_updated_at = excluded.source_updated_at, last_seen_at = excluded.last_seen_at, status = 'active', approval_status = CASE WHEN skills.content_hash <> excluded.content_hash THEN 'review' ELSE skills.approval_status END, approval_updated_at = CASE WHEN skills.content_hash <> excluded.content_hash THEN excluded.approval_updated_at ELSE skills.approval_updated_at END, approved_by = CASE WHEN skills.content_hash <> excluded.content_hash THEN NULL ELSE skills.approved_by END, published_at = CASE WHEN skills.content_hash <> excluded.content_hash THEN NULL ELSE skills.published_at END, verification_status = CASE WHEN skills.content_hash <> excluded.content_hash THEN 'unverified' ELSE skills.verification_status END, verification_updated_at = CASE WHEN skills.content_hash <> excluded.content_hash THEN NULL ELSE skills.verification_updated_at END, verification_summary = CASE WHEN skills.content_hash <> excluded.content_hash THEN NULL ELSE skills.verification_summary END, updated_at = excluded.updated_at").bind(
+    return db.prepare("INSERT INTO skills (id, source_id, name, description, category, region, source, source_url, source_type, compatibility_json, tags_json, install, prompt, app_url, risk, trust, license, license_previous, license_changed_at, content_hash, discovered_via, source_updated_at, last_seen_at, status, approval_status, approval_updated_at, approved_by, published_at, verification_status, verification_updated_at, verification_summary, source_link_status, source_link_checked_at, source_link_error, duplicate_of, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, 'active', 'review', ?, NULL, NULL, 'unverified', NULL, NULL, 'unknown', NULL, NULL, NULL, ?, ?) ON CONFLICT(id) DO UPDATE SET source_id = excluded.source_id, name = excluded.name, description = excluded.description, category = excluded.category, region = excluded.region, source = excluded.source, source_url = excluded.source_url, source_type = excluded.source_type, compatibility_json = excluded.compatibility_json, tags_json = excluded.tags_json, install = excluded.install, prompt = excluded.prompt, app_url = excluded.app_url, risk = excluded.risk, trust = excluded.trust, license_previous = CASE WHEN COALESCE(skills.license, '') <> COALESCE(excluded.license, '') THEN skills.license ELSE skills.license_previous END, license_changed_at = CASE WHEN COALESCE(skills.license, '') <> COALESCE(excluded.license, '') THEN excluded.updated_at ELSE skills.license_changed_at END, license = excluded.license, content_hash = excluded.content_hash, discovered_via = excluded.discovered_via, source_updated_at = excluded.source_updated_at, last_seen_at = excluded.last_seen_at, status = 'active', approval_status = CASE WHEN skills.content_hash <> excluded.content_hash THEN 'review' ELSE skills.approval_status END, approval_updated_at = CASE WHEN skills.content_hash <> excluded.content_hash THEN excluded.approval_updated_at ELSE skills.approval_updated_at END, approved_by = CASE WHEN skills.content_hash <> excluded.content_hash THEN NULL ELSE skills.approved_by END, published_at = CASE WHEN skills.content_hash <> excluded.content_hash THEN NULL ELSE skills.published_at END, verification_status = CASE WHEN skills.content_hash <> excluded.content_hash THEN 'unverified' ELSE skills.verification_status END, verification_updated_at = CASE WHEN skills.content_hash <> excluded.content_hash THEN NULL ELSE skills.verification_updated_at END, verification_summary = CASE WHEN skills.content_hash <> excluded.content_hash THEN NULL ELSE skills.verification_summary END, source_link_status = CASE WHEN skills.source_url <> excluded.source_url OR skills.content_hash <> excluded.content_hash THEN 'unknown' ELSE skills.source_link_status END, source_link_checked_at = CASE WHEN skills.source_url <> excluded.source_url OR skills.content_hash <> excluded.content_hash THEN NULL ELSE skills.source_link_checked_at END, source_link_error = CASE WHEN skills.source_url <> excluded.source_url OR skills.content_hash <> excluded.content_hash THEN NULL ELSE skills.source_link_error END, duplicate_of = CASE WHEN skills.content_hash <> excluded.content_hash THEN NULL ELSE skills.duplicate_of END, updated_at = excluded.updated_at").bind(
       skill.id,
       skill.id.split(":")[0],
       skill.name,
@@ -563,8 +589,18 @@ export async function syncAllSources(env: SyncEnv) {
     await db.prepare("UPDATE skills SET status = 'stale' WHERE last_seen_at < ? AND status = 'active'").bind(seenAt).run();
   }
   const status = errors.length ? "completed_with_errors" : "completed";
-  await db.prepare("UPDATE sync_runs SET finished_at = ?, status = ?, sources_scanned = ?, candidates_seen = ?, accepted = ?, rejected = ?, error_summary = ? WHERE id = ?").bind(now(), status, SYNC_SOURCES.length, candidatesSeen, accepted, rejected, errors.slice(0, 20).join(" | ") || null, runId).run();
-  return { runId, status, sourcesScanned: SYNC_SOURCES.length, candidatesSeen, accepted, rejected, errors: errors.slice(0, 20) };
+  const finishedAt = now();
+  await db.prepare("UPDATE sync_runs SET finished_at = ?, status = ?, sources_scanned = ?, candidates_seen = ?, accepted = ?, rejected = ?, error_summary = ? WHERE id = ?").bind(finishedAt, status, SYNC_SOURCES.length, candidatesSeen, accepted, rejected, errors.slice(0, 20).join(" | ") || null, runId).run();
+  if (errors.length > 0) {
+    await recordOpsAlerts(env, [{ kind: "sync_failure", severity: "critical", title: "Skill 자동 수집 실패", message: errors.slice(0, 5).join(" | "), fingerprint: `sync:${errors.slice(0, 5).join("|").slice(0, 180)}` }]);
+  }
+  let quality = null;
+  try {
+    quality = await runQualityChecks(env);
+  } catch (error) {
+    await recordOpsAlerts(env, [{ kind: "quality_issue", severity: "warning", title: "Skill 품질 점검 실패", message: error instanceof Error ? error.message : "품질 점검을 완료하지 못했습니다.", fingerprint: "quality:run-failed" }]);
+  }
+  return { runId, status, sourcesScanned: SYNC_SOURCES.length, candidatesSeen, accepted, rejected, errors: errors.slice(0, 20), quality };
 }
 
 function rowToSkill(row: Record<string, unknown>): CatalogSkill & { status: string; updatedAt: string } {
@@ -588,6 +624,9 @@ function rowToSkill(row: Record<string, unknown>): CatalogSkill & { status: stri
     contentHash: String(row.content_hash),
     discoveredVia: String(row.discovered_via),
     sourceUpdatedAt: row.source_updated_at ? String(row.source_updated_at) : null,
+    usageCount: Number(row.usage_count ?? 0),
+    favoriteCount: Number(row.favorite_count ?? 0),
+    qualityIssueCount: Number(row.quality_issue_count ?? 0),
     approvalStatus: isApprovalStatus(row.approval_status) ? row.approval_status : "review",
     verificationStatus: isVerificationStatus(row.verification_status) ? row.verification_status : "legacy",
     status: String(row.status),
@@ -624,8 +663,8 @@ export async function listStoredSkills(db: D1Database, search = "", region = "",
     clauses.push("verification_status = ?");
     args.push(verification);
   }
-  const order = sort === "name" ? "name ASC" : sort === "verified" ? "CASE WHEN verification_status = 'sandbox_passed' THEN 0 WHEN verification_status = 'static_passed' THEN 1 WHEN verification_status = 'sandbox_fallback_passed' THEN 2 ELSE 3 END, updated_at DESC" : "updated_at DESC, name ASC";
-  const statement = db.prepare(`SELECT * FROM skills WHERE ${clauses.join(" AND ")} ORDER BY ${order} LIMIT ?`).bind(...args, Math.min(Math.max(limit, 1), 200));
+  const order = sort === "name" ? "name ASC" : sort === "verified" ? "CASE WHEN verification_status = 'sandbox_passed' THEN 0 WHEN verification_status = 'static_passed' THEN 1 WHEN verification_status = 'sandbox_fallback_passed' THEN 2 ELSE 3 END, updated_at DESC" : "(favorite_count * 3 + usage_count) DESC, CASE WHEN verification_status = 'sandbox_passed' THEN 0 WHEN verification_status = 'static_passed' THEN 1 WHEN verification_status = 'sandbox_fallback_passed' THEN 2 ELSE 3 END, updated_at DESC, name ASC";
+  const statement = db.prepare(`SELECT skills.*, COALESCE((SELECT COUNT(*) FROM skill_usage_events WHERE skill_id = skills.id AND event_type IN ('view', 'copy', 'open') AND created_at >= datetime('now', '-30 days')), 0) AS usage_count, COALESCE((SELECT COUNT(*) FROM skill_favorites WHERE skill_id = skills.id), 0) AS favorite_count, COALESCE((SELECT COUNT(*) FROM skill_quality_issues WHERE skill_id = skills.id AND status = 'open'), 0) AS quality_issue_count FROM skills WHERE ${clauses.join(" AND ")} ORDER BY ${order} LIMIT ?`).bind(...args, Math.min(Math.max(limit, 1), 200));
   const result = await statement.all<Record<string, unknown>>();
   return result.results.map(rowToSkill);
 }
@@ -641,6 +680,10 @@ type ReviewQueueRow = CatalogSkill & {
   verificationSummary: string | null;
   lastSeenAt: string;
   updatedAt: string;
+  sourceLinkStatus: string;
+  licensePrevious: string | null;
+  licenseChangedAt: string | null;
+  duplicateOf: string | null;
 };
 
 function rowToReviewQueueItem(row: Record<string, unknown>): ReviewQueueRow {
@@ -655,6 +698,10 @@ function rowToReviewQueueItem(row: Record<string, unknown>): ReviewQueueRow {
     verificationUpdatedAt: row.verification_updated_at ? String(row.verification_updated_at) : null,
     verificationSummary: row.verification_summary ? String(row.verification_summary) : null,
     lastSeenAt: String(row.last_seen_at),
+    sourceLinkStatus: String(row.source_link_status ?? "unknown"),
+    licensePrevious: row.license_previous ? String(row.license_previous) : null,
+    licenseChangedAt: row.license_changed_at ? String(row.license_changed_at) : null,
+    duplicateOf: row.duplicate_of ? String(row.duplicate_of) : null,
   };
 }
 
@@ -690,6 +737,10 @@ export async function changeSkillApproval(
   const verificationStatus = isVerificationStatus(row.verification_status) ? row.verification_status : "legacy";
   if (action === "publish" && !["legacy", "static_passed", "sandbox_passed", "sandbox_fallback_passed"].includes(verificationStatus)) {
     throw new Error("공개 전에 정적 검사, 공식 격리 검증 또는 무결성 fallback 검증이 필요합니다.");
+  }
+  if (action === "publish") {
+    const blocker = await db.prepare("SELECT COUNT(*) AS count FROM skill_quality_issues WHERE skill_id = ? AND status = 'open' AND severity = 'blocker'").bind(skillId).first<{ count: number }>();
+    if (Number(blocker?.count ?? 0) > 0 || row.source_link_status === "broken") throw new Error("공개 전에 깨진 원본 링크 또는 품질 차단 이슈를 해결해야 합니다.");
   }
   const transitions: Record<ReviewAction, { from: ApprovalStatus[]; to: ApprovalStatus }> = {
     approve: { from: ["review"], to: "approved" },

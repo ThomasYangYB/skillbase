@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 import Link from "next/link";
 
 type ApprovalStatus = "review" | "approved" | "rejected" | "published";
@@ -28,6 +28,10 @@ type QueueItem = {
   license: string | null;
   lastSeenAt: string;
   approvalUpdatedAt: string | null;
+  sourceLinkStatus: string;
+  licensePrevious: string | null;
+  licenseChangedAt: string | null;
+  duplicateOf: string | null;
 };
 
 type Counts = Record<ApprovalStatus, number>;
@@ -42,6 +46,9 @@ type VerificationMetrics = {
   static: number;
   averageDurationMs: number | null;
   fallbackRate: number;
+  quality?: { open: number; blockers: number; issues: Array<Record<string, unknown>> };
+  usage?: { totalEvents: number; favorites: number; activeUsers: number; topSkills: Array<Record<string, unknown>> };
+  alerts?: Array<{ id: string; severity: string; title: string; message: string; created_at: string }>;
 };
 
 const tabs: Array<{ key: QueueTab; label: string }> = [
@@ -95,6 +102,8 @@ export default function AdminQueuePage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [metrics, setMetrics] = useState<VerificationMetrics | null>(null);
+  const [toolStatus, setToolStatus] = useState("");
+  const backupInputRef = useRef<HTMLInputElement>(null);
 
   const loadQueue = useCallback(async (nextTab: QueueTab) => {
     setLoading(true);
@@ -115,12 +124,57 @@ export default function AdminQueuePage() {
   const loadMetrics = useCallback(async () => {
     try {
       const response = await fetch("/api/admin/metrics?days=30", { cache: "no-store" });
-      const payload = await response.json() as { verification?: VerificationMetrics };
-      if (response.ok && payload.verification) setMetrics(payload.verification);
+      const payload = await response.json() as { verification?: VerificationMetrics; quality?: VerificationMetrics["quality"]; usage?: VerificationMetrics["usage"]; alerts?: VerificationMetrics["alerts"] };
+      if (response.ok && payload.verification) setMetrics({ ...payload.verification, quality: payload.quality, usage: payload.usage, alerts: payload.alerts });
     } catch {
       // Metrics are informative and should not block queue operations.
     }
   }, []);
+
+  const runBackupTest = async () => {
+    setToolStatus("백업 복구 가능성을 확인하는 중...");
+    try {
+      const response = await fetch("/api/admin/backup-test", { cache: "no-store" });
+      const payload = await response.json() as { ok?: boolean; errors?: string[]; counts?: Record<string, number> };
+      if (!response.ok || !payload.ok) throw new Error(payload.errors?.join(" | ") ?? "백업 복구 테스트에 실패했습니다.");
+      setToolStatus(`백업 복구 테스트 통과 · Skill ${payload.counts?.skills ?? 0}건`);
+    } catch (backupError) {
+      setToolStatus(backupError instanceof Error ? backupError.message : "백업 복구 테스트에 실패했습니다.");
+    }
+  };
+
+  const runQualityCheck = async () => {
+    setToolStatus("중복·원본 링크·라이선스를 점검하는 중...");
+    try {
+      const response = await fetch("/api/admin/quality", { method: "POST" });
+      const payload = await response.json() as { brokenLinks?: number; duplicates?: number; licenseChanges?: number; error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "품질 점검에 실패했습니다.");
+      setToolStatus(`품질 점검 완료 · 깨진 링크 ${payload.brokenLinks ?? 0} · 중복 ${payload.duplicates ?? 0} · 라이선스 변경 ${payload.licenseChanges ?? 0}`);
+      await loadMetrics();
+    } catch (qualityError) {
+      setToolStatus(qualityError instanceof Error ? qualityError.message : "품질 점검에 실패했습니다.");
+    }
+  };
+
+  const testBackupFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setToolStatus("선택한 백업 파일을 검사하는 중...");
+    try {
+      const response = await fetch("/api/admin/backup-test", { method: "POST", headers: { "content-type": "application/json" }, body: await file.text() });
+      const payload = await response.json() as { ok?: boolean; errors?: string[]; warnings?: string[]; counts?: Record<string, number> };
+      if (!response.ok || !payload.ok) throw new Error(payload.errors?.join(" | ") ?? "백업 파일을 복구할 수 없습니다.");
+      setToolStatus(`백업 파일 검사 통과 · Skill ${payload.counts?.skills ?? 0}건${payload.warnings?.length ? ` · 경고 ${payload.warnings.length}건` : ""}`);
+    } catch (backupError) {
+      setToolStatus(backupError instanceof Error ? backupError.message : "백업 파일을 검사하지 못했습니다.");
+    }
+  };
+
+  const resolveAlert = async (alertId: string) => {
+    await fetch("/api/admin/alerts", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ alertId }) });
+    await loadMetrics();
+  };
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void loadQueue(tab); void loadMetrics(); }, 0);
@@ -177,7 +231,7 @@ export default function AdminQueuePage() {
     <main className="admin-shell">
       <header className="admin-topbar">
         <Link className="brand" href="/" aria-label="skillbase 홈"><span className="brand-mark">s<span>·</span></span><span>skillbase</span></Link>
-        <div className="admin-header-actions"><a className="admin-export" href="/api/admin/export">데이터 백업 ↓</a><Link className="admin-back" href="/">카탈로그로 돌아가기 ↗</Link></div>
+        <div className="admin-header-actions"><button className="admin-tool-button" onClick={() => void runBackupTest()}>복구 테스트</button><button className="admin-tool-button" onClick={() => backupInputRef.current?.click()}>백업 파일 검사</button><input ref={backupInputRef} type="file" accept="application/json,.json" hidden onChange={(event) => void testBackupFile(event)} /><button className="admin-tool-button" onClick={() => void runQualityCheck()}>품질 점검</button><a className="admin-export" href="/api/admin/export">데이터 백업 ↓</a><Link className="admin-back" href="/">카탈로그로 돌아가기 ↗</Link></div>
       </header>
 
       <section className="admin-hero">
@@ -196,6 +250,8 @@ export default function AdminQueuePage() {
           <span>fallback {metrics.fallback}건 ({metrics.fallbackRate}%)</span>
           <span>대기·실패 {metrics.queued + metrics.failed}건</span>
           {metrics.averageDurationMs != null && <span>평균 {Math.round(metrics.averageDurationMs / 1000)}초</span>}
+          {metrics.quality && <span>품질 이슈 {metrics.quality.open}건 · 차단 {metrics.quality.blockers}건</span>}
+          {metrics.usage && <span>최근 사용 이벤트 {metrics.usage.totalEvents}건 · 즐겨찾기 {metrics.usage.favorites}건</span>}
         </div>}
       </section>
 
@@ -209,7 +265,9 @@ export default function AdminQueuePage() {
         </div>
 
         {notice && <p className="admin-notice">✓ {notice}</p>}
+        {toolStatus && <p className="admin-notice">{toolStatus}</p>}
         {error && <div className="admin-error"><strong>접근 또는 처리 오류</strong><span>{error}</span></div>}
+        {metrics?.alerts && metrics.alerts.length > 0 && <div className="admin-alert-list"><strong>미해결 운영 알림 {metrics.alerts.length}건</strong>{metrics.alerts.map((alert) => <div className="admin-alert" key={alert.id}><span><b>{alert.title}</b> · {alert.message}</span><button onClick={() => void resolveAlert(alert.id)}>확인 처리</button></div>)}</div>}
         {loading ? (
           <div className="admin-empty">검토 큐를 불러오는 중입니다.</div>
         ) : items.length === 0 ? (
@@ -224,7 +282,7 @@ export default function AdminQueuePage() {
                   <a className="review-source" href={skill.sourceUrl} target="_blank" rel="noreferrer">원본 보기 ↗</a>
                 </div>
                 <p className="review-description">{skill.description}</p>
-                <div className="review-meta"><span>출처: {skill.source}</span><span>발견 경로: {skill.discoveredVia}</span><span>위험도: {skill.risk}</span><span>라이선스: {skill.license ?? "미상"}</span><span>해시: {skill.contentHash.slice(0, 10)}</span><span>최근 확인: {formatDate(skill.lastSeenAt)}</span><span>검증: {formatDate(skill.verificationUpdatedAt)}</span></div>
+                <div className="review-meta"><span>출처: {skill.source}</span><span>발견 경로: {skill.discoveredVia}</span><span>위험도: {skill.risk}</span><span>라이선스: {skill.license ?? "미상"}{skill.licensePrevious && " · 변경 감지"}</span><span>원본 링크: {skill.sourceLinkStatus === "ok" ? "정상" : skill.sourceLinkStatus === "broken" ? "깨짐" : "미확인"}</span>{skill.duplicateOf && <span>중복 대표: {skill.duplicateOf.slice(0, 10)}</span>}<span>해시: {skill.contentHash.slice(0, 10)}</span><span>최근 확인: {formatDate(skill.lastSeenAt)}</span><span>검증: {formatDate(skill.verificationUpdatedAt)}</span></div>
                 {skill.verificationSummary && <p className="verification-summary">{skill.verificationSummary}</p>}
                 <div className="review-actions">
                   <button className="action-secondary" disabled={busyId === skill.id} onClick={() => void requestVerification(skill.id, "static")}>{skill.verificationStatus === "unverified" ? "정적 검사" : "정적 재검사"}</button>

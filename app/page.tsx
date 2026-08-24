@@ -23,6 +23,8 @@ type Skill = {
   verificationStatus?: string;
   license?: string | null;
   updatedAt?: string;
+  usageCount?: number;
+  favoriteCount?: number;
 };
 
 const skills: Skill[] = [
@@ -410,6 +412,8 @@ export default function Home() {
   const [reporting, setReporting] = useState(false);
   const [reportMessage, setReportMessage] = useState("");
   const [feedbackStatus, setFeedbackStatus] = useState("");
+  const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
+  const [favoriteStatus, setFavoriteStatus] = useState("");
   const [syncSummary, setSyncSummary] = useState<{ activeSkills: number; pendingReviews: number; latestRun?: { status?: string; finished_at?: string | null }; sources: unknown[] } | null>(null);
 
   useEffect(() => {
@@ -434,8 +438,19 @@ export default function Home() {
         // Sync status is informative and should not block catalog rendering.
       }
     };
+    const loadFavorites = async () => {
+      try {
+        const response = await fetch("/api/favorites", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json() as { ids?: string[] };
+        if (!cancelled && Array.isArray(payload.ids)) setFavoriteIds(payload.ids);
+      } catch {
+        // Favorites are optional and should not block catalog rendering.
+      }
+    };
     void loadCatalog();
     void loadSyncSummary();
+    void loadFavorites();
     return () => { cancelled = true; };
   }, []);
 
@@ -462,7 +477,7 @@ export default function Home() {
     return [...filtered].sort((left, right) => {
       if (sortMode === "이름순") return left.name.localeCompare(right.name);
       if (sortMode === "최신순") return String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? ""));
-      const score = (skill: Skill) => skill.verificationStatus === "sandbox_passed" ? 4 : skill.verificationStatus === "static_passed" ? 3 : skill.verificationStatus === "sandbox_fallback_passed" ? 2 : skill.trust === "원본 확인" ? 1 : 0;
+      const score = (skill: Skill) => (skill.favoriteCount ?? 0) * 3 + (skill.usageCount ?? 0) + (skill.verificationStatus === "sandbox_passed" ? 4 : skill.verificationStatus === "static_passed" ? 3 : skill.verificationStatus === "sandbox_fallback_passed" ? 2 : skill.trust === "원본 확인" ? 1 : 0);
       return score(right) - score(left) || left.name.localeCompare(right.name);
     });
   }, [activeCategory, activeRegion, activeVerification, catalogSkills, query, sortMode]);
@@ -474,6 +489,16 @@ export default function Home() {
     setReporting(false);
     setReportMessage("");
     setFeedbackStatus("");
+    setFavoriteStatus("");
+    void trackUsage(skill.id, "view");
+  };
+
+  const trackUsage = async (skillId: string, event: "view" | "copy" | "open" | "install_verify") => {
+    try {
+      await fetch("/api/usage", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ skillId, event }) });
+    } catch {
+      // Usage telemetry is best-effort and should not interrupt the workflow.
+    }
   };
 
   const copyPrompt = async () => {
@@ -484,13 +509,30 @@ export default function Home() {
       // Clipboard access can be blocked outside a secure context; the UI still confirms the intent.
     }
     setCopied(true);
+    void trackUsage(selectedSkill.id, "copy");
     window.setTimeout(() => setCopied(false), 2200);
   };
 
   const copyAndOpen = async () => {
     if (!selectedSkill) return;
     await copyPrompt();
+    void trackUsage(selectedSkill.id, "open");
     window.open(selectedSkill.appUrl, "_blank", "noopener,noreferrer");
+  };
+
+  const toggleFavorite = async () => {
+    if (!selectedSkill) return;
+    const active = !favoriteIds.includes(selectedSkill.id);
+    setFavoriteStatus("저장 중...");
+    try {
+      const response = await fetch("/api/favorites", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ skillId: selectedSkill.id, active }) });
+      const payload = await response.json() as { active?: boolean; error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "즐겨찾기를 변경하지 못했습니다.");
+      setFavoriteIds((current) => active ? [...new Set([...current, selectedSkill.id])] : current.filter((id) => id !== selectedSkill.id));
+      setFavoriteStatus(active ? "즐겨찾기에 저장했습니다." : "즐겨찾기에서 제거했습니다.");
+    } catch (error) {
+      setFavoriteStatus(error instanceof Error ? error.message : "즐겨찾기를 변경하지 못했습니다.");
+    }
   };
 
   const sendReport = async () => {
@@ -643,7 +685,7 @@ export default function Home() {
                   </div>
                   <p className="skill-description">{skill.description}</p>
                   <div className="tag-row">{skill.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
-                  <div className="skill-meta"><span className="rating">● {skill.trust}</span><a href={skill.sourceUrl} target="_blank" rel="noreferrer">{skill.source}</a><span>{skill.sourceType}</span></div>
+                  <div className="skill-meta"><span className="rating">● {skill.trust}</span><a href={skill.sourceUrl} target="_blank" rel="noreferrer">{skill.source}</a><span>{skill.sourceType}</span>{(skill.usageCount ?? 0) > 0 && <span className="usage-badge">최근 사용 {skill.usageCount}</span>}</div>
                   <div className="compatibility-row">
                     <span className="compatibility-label">호환</span>
                     {skill.compatibility.map((platform) => <span key={platform} className="platform-chip">{platform}</span>)}
@@ -677,14 +719,16 @@ export default function Home() {
             <div className="modal-heading">
               <div className={`skill-logo ${selectedSkill.accent}`}>{selectedSkill.monogram}</div>
               <div><p className="section-kicker">{selectedSkill.category}</p><h2 id="skill-modal-title">{selectedSkill.name}</h2><p>{selectedSkill.description}</p></div>
+              <button className={`favorite-button ${favoriteIds.includes(selectedSkill.id) ? "active" : ""}`} onClick={() => void toggleFavorite()} aria-label="즐겨찾기">{favoriteIds.includes(selectedSkill.id) ? "★" : "☆"}</button>
             </div>
             <div className="modal-status"><span><CheckIcon /> {selectedSkill.trust}</span><span><CheckIcon /> 권한 검토 {selectedSkill.risk}</span><span>{selectedSkill.region} · {selectedSkill.sourceType}</span><span>라이선스 {selectedSkill.license ?? "미상"}</span></div>
             <p className="modal-source">출처: <a href={selectedSkill.sourceUrl} target="_blank" rel="noreferrer">{selectedSkill.source}</a> ↗</p>
             <div className="modal-columns">
-              <div className="modal-block"><div className="block-title"><span>01</span><h3>설치</h3></div><p>원본 출처의 설치 경로입니다. 실제 실행 권한과 파일 변경 내용을 확인한 뒤 설치하세요.</p><div className="code-box"><code>{selectedSkill.install}</code><button onClick={() => navigator.clipboard?.writeText(selectedSkill.install)} aria-label="설치 명령어 복사">복사</button></div><button className="verify-button" onClick={() => setVerified(true)}>{verified ? "내 환경 확인 표시됨 ✓" : "설치 후 확인 표시"}</button></div>
+              <div className="modal-block"><div className="block-title"><span>01</span><h3>설치</h3></div><p>원본 출처의 설치 경로입니다. 실제 실행 권한과 파일 변경 내용을 확인한 뒤 설치하세요.</p><div className="code-box"><code>{selectedSkill.install}</code><button onClick={() => navigator.clipboard?.writeText(selectedSkill.install)} aria-label="설치 명령어 복사">복사</button></div><button className="verify-button" onClick={() => { setVerified(true); void trackUsage(selectedSkill.id, "install_verify"); }}>{verified ? "내 환경 확인 표시됨 ✓" : "설치 후 확인 표시"}</button></div>
               <div className="modal-block"><div className="block-title"><span>02</span><h3>프롬프트 실행</h3></div><p>입력값을 채운 뒤 프롬프트를 복사하거나 지원 앱에서 바로 시작하세요.</p><div className="prompt-box"><textarea defaultValue={selectedSkill.prompt} aria-label="실행할 프롬프트" /></div><div className="prompt-actions"><button className="secondary-button" onClick={copyPrompt}>{copied ? "복사 완료 ✓" : "프롬프트 복사"}</button><button className="primary-button" onClick={copyAndOpen}>복사 후 앱 열기 ↗</button></div></div>
             </div>
             <p className="modal-footnote">자동 붙여넣기는 사용자의 클릭 후 클립보드에 복사하고 지원 앱을 엽니다. 실제 설치·권한 검증은 로컬 환경에서 확인하세요.</p>
+            {favoriteStatus && <p className="favorite-status">{favoriteStatus}</p>}
             <div className="feedback-box">
               <button className="feedback-toggle" onClick={() => { setReporting((current) => !current); setFeedbackStatus(""); }}>
                 {reporting ? "신고 닫기" : "이 Skill에 문제 신고"}

@@ -18,6 +18,8 @@ export const skills = sqliteTable("skills", {
   risk: text("risk").notNull(),
   trust: text("trust").notNull(),
   license: text("license"),
+  licensePrevious: text("license_previous"),
+  licenseChangedAt: text("license_changed_at"),
   contentHash: text("content_hash").notNull(),
   discoveredVia: text("discovered_via").notNull(),
   sourceUpdatedAt: text("source_updated_at"),
@@ -30,6 +32,10 @@ export const skills = sqliteTable("skills", {
   verificationStatus: text("verification_status").notNull().default("unverified"),
   verificationUpdatedAt: text("verification_updated_at"),
   verificationSummary: text("verification_summary"),
+  sourceLinkStatus: text("source_link_status").notNull().default("unknown"),
+  sourceLinkCheckedAt: text("source_link_checked_at"),
+  sourceLinkError: text("source_link_error"),
+  duplicateOf: text("duplicate_of"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (table) => ({
@@ -108,4 +114,54 @@ export const skillFeedback = sqliteTable("skill_feedback", {
   createdAt: text("created_at").notNull(),
 }, (table) => ({
   skillIdx: index("idx_skill_feedback_skill").on(table.skillId, table.createdAt),
+}));
+
+export const opsAlerts = sqliteTable("ops_alerts", {
+  id: text("id").primaryKey(),
+  kind: text("kind").notNull(),
+  severity: text("severity").notNull(),
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  fingerprint: text("fingerprint").notNull(),
+  status: text("status").notNull().default("open"),
+  createdAt: text("created_at").notNull(),
+  resolvedAt: text("resolved_at"),
+}, (table) => ({
+  statusIdx: index("idx_ops_alerts_status_created").on(table.status, table.createdAt),
+  fingerprintIdx: index("idx_ops_alerts_fingerprint").on(table.fingerprint, table.createdAt),
+}));
+
+export const skillQualityIssues = sqliteTable("skill_quality_issues", {
+  id: text("id").primaryKey(),
+  skillId: text("skill_id").notNull(),
+  kind: text("kind").notNull(),
+  severity: text("severity").notNull(),
+  status: text("status").notNull().default("open"),
+  message: text("message").notNull(),
+  detailsJson: text("details_json").notNull().default("{}"),
+  checkedAt: text("checked_at").notNull(),
+}, (table) => ({
+  skillKindIdx: index("idx_skill_quality_skill_kind").on(table.skillId, table.kind),
+  statusIdx: index("idx_skill_quality_status").on(table.status, table.severity),
+}));
+
+export const skillUsageEvents = sqliteTable("skill_usage_events", {
+  id: text("id").primaryKey(),
+  skillId: text("skill_id").notNull(),
+  eventType: text("event_type").notNull(),
+  actorId: text("actor_id"),
+  createdAt: text("created_at").notNull(),
+}, (table) => ({
+  skillEventIdx: index("idx_skill_usage_skill_event").on(table.skillId, table.eventType, table.createdAt),
+  actorIdx: index("idx_skill_usage_actor").on(table.actorId, table.createdAt),
+}));
+
+export const skillFavorites = sqliteTable("skill_favorites", {
+  id: text("id").primaryKey(),
+  skillId: text("skill_id").notNull(),
+  actorId: text("actor_id").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => ({
+  skillActorIdx: index("idx_skill_favorites_skill_actor").on(table.skillId, table.actorId),
+  actorIdx: index("idx_skill_favorites_actor").on(table.actorId, table.createdAt),
 }));

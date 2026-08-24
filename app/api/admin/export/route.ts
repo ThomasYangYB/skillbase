@@ -1,5 +1,5 @@
 import { getOperator, operatorErrorResponse } from "../../../../lib/operator";
-import { getSyncStatus } from "../../../../lib/sync";
+import { createBackupSnapshot } from "../../../../lib/backup";
 import { runtimeEnv } from "../../../../lib/runtime-env";
 
 export const dynamic = "force-dynamic";
@@ -8,15 +8,9 @@ export async function GET(request: Request) {
   if (!runtimeEnv.DB) return Response.json({ error: "D1 is not configured" }, { status: 503 });
   if (!getOperator(request)) return operatorErrorResponse();
   try {
-    const sync = await getSyncStatus(runtimeEnv.DB);
-    const [skills, reviewEvents, verificationJobs, feedback] = await Promise.all([
-      runtimeEnv.DB.prepare("SELECT * FROM skills ORDER BY updated_at DESC, name ASC").all<Record<string, unknown>>(),
-      runtimeEnv.DB.prepare("SELECT * FROM skill_review_events ORDER BY created_at DESC LIMIT 5000").all<Record<string, unknown>>(),
-      runtimeEnv.DB.prepare("SELECT * FROM skill_verification_jobs ORDER BY created_at DESC LIMIT 5000").all<Record<string, unknown>>(),
-      runtimeEnv.DB.prepare("SELECT * FROM skill_feedback ORDER BY created_at DESC LIMIT 5000").all<Record<string, unknown>>(),
-    ]);
+    const snapshot = await createBackupSnapshot(runtimeEnv.DB);
     const filename = `skillbase-export-${new Date().toISOString().slice(0, 10)}.json`;
-    return Response.json({ exportedAt: new Date().toISOString(), skills: skills.results ?? [], reviewEvents: reviewEvents.results ?? [], verificationJobs: verificationJobs.results ?? [], feedback: feedback.results ?? [], sync }, {
+    return Response.json(snapshot, {
       headers: { "cache-control": "no-store", "content-disposition": `attachment; filename="${filename}"` },
     });
   } catch (error) {

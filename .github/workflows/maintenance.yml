@@ -1,0 +1,56 @@
+name: Scheduled maintenance
+
+on:
+  schedule:
+    - cron: "17 2 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  dependency-audit:
+    name: Audit dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+      - name: Install site dependencies
+        run: npm ci
+      - name: Audit site dependencies
+        run: npm audit --audit-level=high
+      - name: Install adapter dependencies
+        working-directory: sandbox-adapter
+        run: npm ci
+      - name: Audit adapter dependencies
+        working-directory: sandbox-adapter
+        run: npm audit --audit-level=high
+
+  skills-cli-drift:
+    name: Detect Skills CLI updates
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare pinned and published CLI versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current="$(sed -n 's/^ARG SKILLS_CLI_VERSION=//p' sandbox-adapter/Dockerfile)"
+          latest="$(npm view skills version)"
+          if [ "$current" = "$latest" ]; then
+            echo "Skills CLI is current: $current"
+            exit 0
+          fi
+          title="chore: update Skills CLI from $current to $latest"
+          open_count="$(gh issue list --state open --search "$title in:title" --json number --jq 'length')"
+          if [ "$open_count" = "0" ]; then
+            gh issue create --title "$title" --body "The weekly maintenance check found a newer \\`skills\\` CLI. Review the release, update sandbox-adapter/Dockerfile, run the adapter tests, and deploy the Worker after approval."
+          fi
+          echo "Pinned Skills CLI $current differs from published $latest"

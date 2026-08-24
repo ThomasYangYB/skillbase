@@ -1,4 +1,5 @@
 import { getStoredSkillRecord, type VerificationStatus } from "./sync";
+import { recordOpsAlerts } from "./alerts";
 
 export type VerificationMode = "static" | "sandbox";
 export type VerificationJobStatus = "queued" | "running" | "passed" | "warning" | "blocked" | "failed" | "unavailable";
@@ -15,6 +16,7 @@ export type VerificationEnv = {
   GITHUB_TOKEN?: string;
   SKILLBASE_SANDBOX_URL?: string;
   SKILLBASE_SANDBOX_TOKEN?: string;
+  SKILLBASE_ALERT_WEBHOOK_URL?: string;
 };
 
 type SandboxResultPayload = {
@@ -142,6 +144,9 @@ async function applySandboxResult(env: VerificationEnv, row: { id: string; skill
     env.DB.prepare("UPDATE skill_verification_jobs SET status = ?, summary = ?, findings_json = ?, verification_method = ?, duration_ms = ?, finished_at = ? WHERE id = ? AND source_hash = ?").bind(payload.status, summary, JSON.stringify(findings), payload.verificationMethod ?? null, durationMs, finishedAt, row.id, row.source_hash),
     env.DB.prepare("UPDATE skills SET verification_status = ?, verification_updated_at = ?, verification_summary = ? WHERE id = ? AND content_hash = ?").bind(verificationStatus, finishedAt, summary, row.skill_id, row.source_hash),
   ]);
+  if (payload.status === "failed") {
+    await recordOpsAlerts(env, [{ kind: "verification_failure", severity: "critical", title: "Sandbox 검증 실패", message: summary, fingerprint: `verification:${row.id}:failed` }]);
+  }
   return true;
 }
 
@@ -156,7 +161,10 @@ export async function refreshSandboxVerificationJobs(env: VerificationEnv, skill
       const response = await fetch(sandboxResultUrl(env.SKILLBASE_SANDBOX_URL, row.id), {
         headers: { authorization: `Bearer ${env.SKILLBASE_SANDBOX_TOKEN}`, "user-agent": "skillbase-verification-poller/1.0" },
       });
-      if (!response.ok) continue;
+      if (!response.ok) {
+        if (response.status >= 500) await recordOpsAlerts(env, [{ kind: "verification_failure", severity: "warning", title: "Sandbox 결과 조회 실패", message: `검증 작업 ${row.id}의 결과 조회가 ${response.status}로 실패했습니다.`, fingerprint: `verification:${row.id}:poll-${response.status}` }]);
+        continue;
+      }
       const payload = await response.json() as SandboxResultPayload;
       if (await applySandboxResult(env, row, payload)) {
         updated += 1;
@@ -165,12 +173,14 @@ export async function refreshSandboxVerificationJobs(env: VerificationEnv, skill
       if (Date.now() - Date.parse(row.created_at) > SANDBOX_QUEUE_TIMEOUT_MS) {
         const finishedAt = now();
         await env.DB.prepare("UPDATE skill_verification_jobs SET status = 'failed', summary = ?, verification_method = NULL, finished_at = ? WHERE id = ? AND status = 'queued'").bind("Sandbox Queue 작업이 30분 안에 완료되지 않아 만료 처리되었습니다. 다시 검증을 요청하세요.", finishedAt, row.id).run();
+        await recordOpsAlerts(env, [{ kind: "verification_failure", severity: "critical", title: "Sandbox 검증 시간 초과", message: `검증 작업 ${row.id}가 30분 안에 완료되지 않았습니다.`, fingerprint: `verification:${row.id}:timeout` }]);
         updated += 1;
       }
     } catch {
       if (Date.now() - Date.parse(row.created_at) > SANDBOX_QUEUE_TIMEOUT_MS) {
         const finishedAt = now();
         await env.DB.prepare("UPDATE skill_verification_jobs SET status = 'failed', summary = ?, verification_method = NULL, finished_at = ? WHERE id = ? AND status = 'queued'").bind("Sandbox 어댑터가 30분 안에 결과를 반환하지 않아 만료 처리되었습니다. 다시 검증을 요청하세요.", finishedAt, row.id).run();
+        await recordOpsAlerts(env, [{ kind: "verification_failure", severity: "critical", title: "Sandbox 어댑터 응답 시간 초과", message: `검증 작업 ${row.id}가 결과를 받지 못했습니다.`, fingerprint: `verification:${row.id}:adapter-timeout` }]);
         updated += 1;
       }
     }
@@ -199,6 +209,7 @@ export async function runStaticVerification(env: VerificationEnv, skillId: strin
     const finishedAt = now();
     const summary = error instanceof Error ? error.message : "정적 검증에 실패했습니다.";
     await db.prepare("UPDATE skill_verification_jobs SET status = 'failed', summary = ?, finished_at = ? WHERE id = ?").bind(summary, finishedAt, jobId).run();
+    await recordOpsAlerts(env, [{ kind: "verification_failure", severity: "critical", title: "정적 검증 실패", message: summary, fingerprint: `verification:${jobId}:static-failed` }]);
     throw new Error(summary);
   }
 }
@@ -218,6 +229,7 @@ export async function requestSandboxVerification(env: VerificationEnv, skillId: 
   if (!env.SKILLBASE_SANDBOX_URL) {
     const summary = "Cloudflare Sandbox 어댑터가 연결되지 않았습니다. 정적 검사 결과만 사용하세요.";
     await db.prepare("UPDATE skill_verification_jobs SET status = 'unavailable', summary = ?, finished_at = ? WHERE id = ?").bind(summary, now(), jobId).run();
+    await recordOpsAlerts(env, [{ kind: "verification_failure", severity: "warning", title: "Sandbox 어댑터 미연결", message: summary, fingerprint: "verification:sandbox-unavailable" }]);
     return { jobId, mode: "sandbox" as const, status: "sandbox_unavailable" as const, jobStatus: "unavailable" as const, summary, findings: [] as VerificationFinding[] };
   }
 
@@ -247,6 +259,7 @@ export async function requestSandboxVerification(env: VerificationEnv, skillId: 
   } catch (error) {
     const summary = error instanceof Error ? error.message : "Sandbox 어댑터 요청에 실패했습니다.";
     await db.prepare("UPDATE skill_verification_jobs SET status = 'failed', summary = ?, finished_at = ? WHERE id = ?").bind(summary, now(), jobId).run();
+    await recordOpsAlerts(env, [{ kind: "verification_failure", severity: "critical", title: "Sandbox 요청 실패", message: summary, fingerprint: `verification:${jobId}:request-failed` }]);
     throw new Error(summary);
   }
 }

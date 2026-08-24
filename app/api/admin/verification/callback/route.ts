@@ -1,4 +1,5 @@
 import { runtimeEnv } from "../../../../../lib/runtime-env";
+import { recordOpsAlerts } from "../../../../../lib/alerts";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,7 @@ export async function POST(request: Request) {
       runtimeEnv.DB.prepare("UPDATE skill_verification_jobs SET status = ?, summary = ?, findings_json = ?, finished_at = ? WHERE id = ? AND source_hash = ?").bind(body.status, summary, JSON.stringify(findings), finishedAt, body.jobId, body.sourceHash),
       runtimeEnv.DB.prepare("UPDATE skills SET verification_status = ?, verification_updated_at = ?, verification_summary = ? WHERE id = ? AND content_hash = ?").bind(verificationStatus, finishedAt, summary, job.skill_id, body.sourceHash),
     ]);
+    if (body.status === "failed") await recordOpsAlerts(runtimeEnv, [{ kind: "verification_failure", severity: "critical", title: "Sandbox callback 검증 실패", message: summary, fingerprint: `verification:${body.jobId}:callback-failed` }]);
     return Response.json({ jobId: body.jobId, status: body.status, verificationStatus, summary });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Sandbox callback을 처리하지 못했습니다." }, { status: 400 });
