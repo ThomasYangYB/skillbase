@@ -42,9 +42,10 @@ test("server-renders the skillbase catalog", async () => {
 });
 
 test("keeps the installation and prompt workflow in the product source", async () => {
-  const [page, layout] = await Promise.all([
+  const [page, layout, detail] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/skills/[...id]/SkillDetailClient.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /navigator\.clipboard/);
@@ -54,6 +55,7 @@ test("keeps the installation and prompt workflow in the product source", async (
   assert.match(page, /sourceUrl/);
   assert.match(layout, /title: "skillbase — 실제 AI Skills 카탈로그"/);
   assert.match(layout, /<html lang="ko">/);
+  assert.match(detail, /<Link prefetch=\{false\} className="brand" href="\/" aria-label="skillbase 홈" onClick=/);
 });
 
 test("keeps the scheduled Agent Skills collection pipeline configured", async () => {

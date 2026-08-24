@@ -41,7 +41,7 @@ export default function SkillDetailClient({ skillId }: { skillId: string }) {
     fetch("/api/favorites", { cache: "no-store" }).then((response) => response.json()).then((payload: { ids?: string[] }) => setFavorite(payload.ids?.includes(skill.id) ?? false)).catch(() => undefined);
   }, [skill]);
 
-  if (!skill) return <main className="detail-shell"><header className="detail-topbar"><Link className="brand" href="/" aria-label="skillbase 홈"><span className="brand-mark">s<span>·</span></span><span>skillbase</span></Link><Link className="detail-back" href="/">← 카탈로그</Link></header><div className="detail-loading" role="status">{status || "Skill 상세 정보를 불러오는 중입니다."}</div></main>;
+  if (!skill) return <main className="detail-shell"><header className="detail-topbar"><Link prefetch={false} className="brand" href="/" aria-label="skillbase 홈" onClick={(event) => { event.preventDefault(); window.location.assign("/"); }}><span className="brand-mark">s<span>·</span></span><span>skillbase</span></Link><Link className="detail-back" href="/">← 카탈로그</Link></header><div className="detail-loading" role="status">{status || "Skill 상세 정보를 불러오는 중입니다."}</div></main>;
 
   const track = (event: string) => {
     void fetch("/api/usage", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ skillId: skill.id, event }) }).catch(() => undefined);
@@ -73,7 +73,7 @@ export default function SkillDetailClient({ skillId }: { skillId: string }) {
 
   return (
     <main className="detail-shell">
-      <header className="detail-topbar"><Link className="brand" href="/" aria-label="skillbase 홈"><span className="brand-mark">s<span>·</span></span><span>skillbase</span></Link><Link className="detail-back" href="/">← 카탈로그</Link></header>
+      <header className="detail-topbar"><Link prefetch={false} className="brand" href="/" aria-label="skillbase 홈" onClick={(event) => { event.preventDefault(); window.location.assign("/"); }}><span className="brand-mark">s<span>·</span></span><span>skillbase</span></Link><Link className="detail-back" href="/">← 카탈로그</Link></header>
       <article className="detail-page">
         <div className="detail-heading"><div className="detail-monogram">{skill.name.slice(0, 2).toUpperCase()}</div><div><p className="section-kicker">{skill.category}</p><h1>{skill.name}</h1><p>{skill.description}</p></div><button className={`favorite-button ${favorite ? "active" : ""}`} onClick={() => void toggleFavorite()} aria-label="즐겨찾기">{favorite ? "★" : "☆"}</button></div>
         <div className="detail-badges"><span>{verificationLabel(skill.verificationStatus)}</span><span>권한 위험도 {skill.risk}</span><span>{skill.region} · {skill.sourceType}</span><span>라이선스 {skill.license ?? "미상"}</span></div>
