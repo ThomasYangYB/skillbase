@@ -9,6 +9,7 @@ type Skill = {
   monogram: string;
   category: string;
   description: string;
+  summaryKo?: string;
   tags: string[];
   compatibility: string[];
   risk: "낮음" | "주의";
@@ -27,6 +28,44 @@ type Skill = {
   usageCount?: number;
   favoriteCount?: number;
 };
+
+const categorySummaryByName: Record<string, string> = {
+  "개발·IT": "개발 작업을 돕습니다.",
+  "디자인·크리에이티브": "디자인과 콘텐츠 제작을 돕습니다.",
+  "문서·사무": "문서 작성과 편집을 돕습니다.",
+  "한국어·문서": "한국어 문서 작성과 교정을 돕습니다.",
+  "업무 자동화": "반복 업무와 AI 자동화를 돕습니다.",
+  "리서치·데이터": "자료 조사와 데이터 분석을 돕습니다.",
+  "콘텐츠·마케팅": "콘텐츠 작성과 마케팅을 돕습니다.",
+};
+
+const summaryRules: Array<[RegExp, string]> = [
+  [/algorithmic|generative art|p5\.js/i, "p5.js와 시드 기반 기법으로 생성형·알고리즘 아트를 만듭니다."],
+  [/^access$|telegram.*access/i, "텔레그램 채널의 접근 권한과 허용 목록을 관리합니다."],
+  [/frontend-design|web design|ui|ux/i, "목적에 맞는 웹 인터페이스와 사용자 경험을 설계합니다."],
+  [/react|next\.js/i, "React·Next.js 코드의 품질과 성능 개선 지점을 점검합니다."],
+  [/code review|pull request|\bpr\b/i, "코드 변경 사항의 품질과 보안 위험을 구조적으로 검토합니다."],
+  [/pdf/i, "PDF를 생성·추출·편집하고 결과를 검토합니다."],
+  [/docx|word document/i, "Word 문서를 만들고 편집하며 결과를 확인합니다."],
+  [/pptx|presentation|slide/i, "발표 자료를 구성하고 슬라이드 품질을 점검합니다."],
+  [/xlsx|spreadsheet|excel/i, "스프레드시트의 수식·서식·데이터 품질을 관리합니다."],
+  [/cloudflare|workers?/i, "Cloudflare 환경에서 Workers와 관련 기능을 구현합니다."],
+  [/agent|mcp|workflow|automation/i, "AI 에이전트와 반복 업무 자동화 흐름을 설계합니다."],
+  [/test|tdd|testing/i, "테스트 중심 개발과 코드 품질 개선을 지원합니다."],
+  [/research|data|analytics|market/i, "자료를 조사하고 데이터를 분석해 인사이트를 정리합니다."],
+  [/marketing|seo|content|writing/i, "콘텐츠 작성과 검색·마케팅 작업을 지원합니다."],
+];
+
+function getSkillSummary(skill: Pick<Skill, "name" | "description" | "category" | "tags" | "summaryKo">) {
+  if (skill.summaryKo?.trim()) return skill.summaryKo.trim();
+  if (/[가-힣]/.test(skill.description)) return skill.description.trim();
+  const haystack = `${skill.name} ${skill.description} ${skill.tags.join(" ")}`;
+  const matched = summaryRules.find(([pattern]) => pattern.test(haystack));
+  if (matched) return matched[1];
+  const tags = skill.tags.filter((tag) => tag !== skill.category).slice(0, 2).join("·");
+  const categorySummary = categorySummaryByName[skill.category] ?? "AI 작업을 돕습니다.";
+  return tags ? `${tags} 중심으로 ${categorySummary}` : categorySummary;
+}
 
 const skills: Skill[] = [
   {
@@ -716,7 +755,7 @@ export default function Home() {
             <div>
               <p className="section-kicker">CURATED FOR YOU</p>
               <h2>{activeCategory === "전체" ? `${activeRegion === "전체" ? "수집된" : activeRegion} Skills` : activeCategory}</h2>
-              <p className="catalog-note">공개 원본 기준 초기 큐레이션 · 카드의 출처명을 누르면 원문을 확인할 수 있습니다.</p>
+              <p className="catalog-note">공개 원본 기준 초기 큐레이션 · 카드 설명에 마우스를 올리면 한국어 요약을 볼 수 있습니다.</p>
             </div>
             <div className="catalog-controls">
               <span>{filteredSkills.length}개 표시</span>
@@ -745,7 +784,10 @@ export default function Home() {
                       <p>{skill.category}</p>
                     </div>
                   </div>
-                  <p className="skill-description">{skill.description}</p>
+                  <button type="button" className="skill-summary-trigger" aria-label={`한국어 요약: ${getSkillSummary(skill)}`}>
+                    <span className="skill-description">{skill.description}</span>
+                    <span className="skill-summary-tooltip"><strong>한국어 요약</strong><span>{getSkillSummary(skill)}</span></span>
+                  </button>
                   <div className="tag-row">{skill.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
                   <div className="skill-meta"><span className="rating">● {skill.trust}</span><a href={skill.sourceUrl} target="_blank" rel="noreferrer">{skill.source}</a><span>{skill.sourceType}</span>{(skill.usageCount ?? 0) > 0 && <span className="usage-badge">최근 사용 {skill.usageCount}</span>}</div>
                   <div className="compatibility-row">

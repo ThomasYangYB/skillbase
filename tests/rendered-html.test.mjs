@@ -37,6 +37,7 @@ test("server-renders the skillbase catalog", async () => {
   assert.match(html, /humanizer/);
   assert.match(html, /frontend-design/);
   assert.match(html, /권한 위험도/);
+  assert.match(html, /한국어 요약/);
   assert.match(html, /운영자 큐/);
   assert.doesNotMatch(html, /Your site is taking shape|react-loading-skeleton|codex-preview/);
 });
