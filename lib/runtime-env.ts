@@ -5,6 +5,7 @@ export type RuntimeEnv = {
   GITHUB_TOKEN?: string;
   SKILLBASE_SYNC_TOKEN?: string;
   SKILLBASE_OPERATOR_USER_ID?: string;
+  SKILLBASE_OPERATOR_EMAIL?: string;
 };
 
 export const runtimeEnv = cloudflareEnv as unknown as RuntimeEnv;
