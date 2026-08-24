@@ -1,20 +1,13 @@
 import { changeSkillApproval, listReviewQueue, type ReviewAction } from "../../../../lib/sync";
-import { getOperator } from "../../../../lib/operator";
+import { getOperator, operatorErrorResponse } from "../../../../lib/operator";
 import { runtimeEnv } from "../../../../lib/runtime-env";
 
 export const dynamic = "force-dynamic";
 
-function unauthorized() {
-  if (!runtimeEnv.SKILLBASE_OPERATOR_USER_ID) {
-    return Response.json({ error: "운영자 계정이 아직 설정되지 않았습니다." }, { status: 503 });
-  }
-  return Response.json({ error: "운영자 권한이 필요합니다." }, { status: 401 });
-}
-
 export async function GET(request: Request) {
   if (!runtimeEnv.DB) return Response.json({ error: "D1 is not configured" }, { status: 503 });
   const operator = getOperator(request);
-  if (!operator) return unauthorized();
+  if (!operator) return operatorErrorResponse();
   const url = new URL(request.url);
   const status = url.searchParams.get("status") ?? "review";
   const result = await listReviewQueue(runtimeEnv.DB, status, Number(url.searchParams.get("limit") ?? 100));
@@ -24,7 +17,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!runtimeEnv.DB) return Response.json({ error: "D1 is not configured" }, { status: 503 });
   const operator = getOperator(request);
-  if (!operator) return unauthorized();
+  if (!operator) return operatorErrorResponse();
 
   try {
     const body = await request.json() as { skillId?: string; action?: ReviewAction; note?: string };

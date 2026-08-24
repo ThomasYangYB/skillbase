@@ -74,13 +74,16 @@ test("keeps the scheduled Agent Skills collection pipeline configured", async ()
 });
 
 test("keeps the operator approval queue and publication gate configured", async () => {
-  const [schema, sync, route, operator, adminPage, migration] = await Promise.all([
+  const [schema, sync, route, operator, adminPage, migration, verification, callback, verificationMigration] = await Promise.all([
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/sync.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/admin/queue/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/operator.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/admin/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0002_supreme_zodiak.sql", import.meta.url), "utf8"),
+    readFile(new URL("../lib/verification.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/admin/verification/callback/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0003_supreme_brood.sql", import.meta.url), "utf8"),
   ]);
 
   assert.match(schema, /approvalStatus/);
@@ -92,4 +95,10 @@ test("keeps the operator approval queue and publication gate configured", async 
   assert.match(adminPage, /검토 필요/);
   assert.match(adminPage, /공개하기/);
   assert.match(migration, /UPDATE `skills` SET `approval_status` = 'published'/);
+  assert.match(schema, /skillVerificationJobs/);
+  assert.match(sync, /정적 검사 통과 또는 격리 검증 통과/);
+  assert.match(verification, /runStaticVerification/);
+  assert.match(verification, /SKILLBASE_SANDBOX_URL/);
+  assert.match(callback, /sourceHash/);
+  assert.match(verificationMigration, /verification_status` = 'legacy'/);
 });

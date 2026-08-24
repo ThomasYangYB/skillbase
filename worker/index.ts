@@ -10,6 +10,8 @@ interface Env {
   SKILLBASE_SYNC_TOKEN?: string;
   SKILLBASE_OPERATOR_USER_ID?: string;
   SKILLBASE_OPERATOR_EMAIL?: string;
+  SKILLBASE_SANDBOX_URL?: string;
+  SKILLBASE_SANDBOX_TOKEN?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {

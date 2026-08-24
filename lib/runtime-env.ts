@@ -6,6 +6,8 @@ export type RuntimeEnv = {
   SKILLBASE_SYNC_TOKEN?: string;
   SKILLBASE_OPERATOR_USER_ID?: string;
   SKILLBASE_OPERATOR_EMAIL?: string;
+  SKILLBASE_SANDBOX_URL?: string;
+  SKILLBASE_SANDBOX_TOKEN?: string;
 };
 
 export const runtimeEnv = cloudflareEnv as unknown as RuntimeEnv;

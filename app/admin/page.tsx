@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
 type ApprovalStatus = "review" | "approved" | "rejected" | "published";
+type VerificationStatus = "unverified" | "legacy" | "static_passed" | "static_warning" | "static_blocked" | "sandbox_passed" | "sandbox_failed" | "sandbox_unavailable";
 type QueueTab = ApprovalStatus | "all";
 type ReviewAction = "approve" | "publish" | "reject" | "review" | "unpublish";
 
@@ -21,6 +22,9 @@ type QueueItem = {
   discoveredVia: string;
   contentHash: string;
   approvalStatus: ApprovalStatus;
+  verificationStatus: VerificationStatus;
+  verificationUpdatedAt: string | null;
+  verificationSummary: string | null;
   lastSeenAt: string;
   approvalUpdatedAt: string | null;
 };
@@ -49,6 +53,19 @@ const actionLabel: Record<ReviewAction, string> = {
   review: "검토로 되돌리기",
   unpublish: "공개 해제",
 };
+
+const verificationLabel: Record<VerificationStatus, string> = {
+  unverified: "검증 전",
+  legacy: "기존 공개",
+  static_passed: "정적 검사 통과",
+  static_warning: "정적 경고",
+  static_blocked: "정적 차단",
+  sandbox_passed: "격리 검증 통과",
+  sandbox_failed: "격리 검증 실패",
+  sandbox_unavailable: "격리 실행기 미연결",
+};
+
+const publishableVerification = new Set<VerificationStatus>(["legacy", "static_passed", "sandbox_passed"]);
 
 function formatDate(value: string | null) {
   if (!value) return "아직 없음";
@@ -106,6 +123,27 @@ export default function AdminQueuePage() {
     }
   };
 
+  const requestVerification = async (skillId: string, mode: "static" | "sandbox") => {
+    setBusyId(skillId);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch("/api/admin/verification", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ skillId, mode }),
+      });
+      const payload = await response.json() as { error?: string; summary?: string };
+      if (!response.ok && response.status !== 202) throw new Error(payload.error ?? "검증을 요청하지 못했습니다.");
+      setNotice(payload.summary ?? (mode === "static" ? "정적 검사를 완료했습니다." : "격리 검증을 요청했습니다."));
+      await loadQueue(tab);
+    } catch (verificationError) {
+      setError(verificationError instanceof Error ? verificationError.message : "검증을 요청하지 못했습니다.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
     <main className="admin-shell">
       <header className="admin-topbar">
@@ -146,14 +184,17 @@ export default function AdminQueuePage() {
               <article className="review-card" key={skill.id}>
                 <div className="review-card-heading">
                   <div className="review-monogram">{skill.name.slice(0, 3).toUpperCase()}</div>
-                  <div className="review-title"><div><h2>{skill.name}</h2><span className={`approval-pill approval-${skill.approvalStatus}`}>{statusLabel[skill.approvalStatus]}</span></div><p>{skill.category} · {skill.region} · {skill.sourceType}</p></div>
+                  <div className="review-title"><div><h2>{skill.name}</h2><span className={`approval-pill approval-${skill.approvalStatus}`}>{statusLabel[skill.approvalStatus]}</span><span className={`verification-pill verification-${skill.verificationStatus}`}>{verificationLabel[skill.verificationStatus]}</span></div><p>{skill.category} · {skill.region} · {skill.sourceType}</p></div>
                   <a className="review-source" href={skill.sourceUrl} target="_blank" rel="noreferrer">원본 보기 ↗</a>
                 </div>
                 <p className="review-description">{skill.description}</p>
-                <div className="review-meta"><span>출처: {skill.source}</span><span>발견 경로: {skill.discoveredVia}</span><span>위험도: {skill.risk}</span><span>해시: {skill.contentHash.slice(0, 10)}</span><span>최근 확인: {formatDate(skill.lastSeenAt)}</span></div>
+                <div className="review-meta"><span>출처: {skill.source}</span><span>발견 경로: {skill.discoveredVia}</span><span>위험도: {skill.risk}</span><span>해시: {skill.contentHash.slice(0, 10)}</span><span>최근 확인: {formatDate(skill.lastSeenAt)}</span><span>검증: {formatDate(skill.verificationUpdatedAt)}</span></div>
+                {skill.verificationSummary && <p className="verification-summary">{skill.verificationSummary}</p>}
                 <div className="review-actions">
+                  <button className="action-secondary" disabled={busyId === skill.id} onClick={() => void requestVerification(skill.id, "static")}>{skill.verificationStatus === "unverified" ? "정적 검사" : "정적 재검사"}</button>
+                  {skill.verificationStatus !== "static_blocked" && skill.verificationStatus !== "sandbox_passed" && <button className="action-secondary" disabled={busyId === skill.id} onClick={() => void requestVerification(skill.id, "sandbox")}>격리 검증 요청</button>}
                   {skill.approvalStatus === "review" && <><button className="action-primary" disabled={busyId === skill.id} onClick={() => void changeStatus(skill.id, "approve")}>승인 → 공개 전</button><button className="action-danger" disabled={busyId === skill.id} onClick={() => void changeStatus(skill.id, "reject")}>반려</button></>}
-                  {skill.approvalStatus === "approved" && <><button className="action-primary" disabled={busyId === skill.id} onClick={() => void changeStatus(skill.id, "publish")}>공개하기</button><button className="action-danger" disabled={busyId === skill.id} onClick={() => void changeStatus(skill.id, "reject")}>반려</button></>}
+                  {skill.approvalStatus === "approved" && <>{publishableVerification.has(skill.verificationStatus) ? <button className="action-primary" disabled={busyId === skill.id} onClick={() => void changeStatus(skill.id, "publish")}>공개하기</button> : <button className="action-disabled" disabled>검증 후 공개</button>}<button className="action-danger" disabled={busyId === skill.id} onClick={() => void changeStatus(skill.id, "reject")}>반려</button></>}
                   {skill.approvalStatus === "rejected" && <button className="action-secondary" disabled={busyId === skill.id} onClick={() => void changeStatus(skill.id, "review")}>검토로 되돌리기</button>}
                   {skill.approvalStatus === "published" && <><button className="action-secondary" disabled={busyId === skill.id} onClick={() => void changeStatus(skill.id, "review")}>재검토 요청</button><button className="action-danger" disabled={busyId === skill.id} onClick={() => void changeStatus(skill.id, "unpublish")}>공개 해제</button></>}
                 </div>

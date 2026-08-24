@@ -27,11 +27,15 @@ export const skills = sqliteTable("skills", {
   approvalUpdatedAt: text("approval_updated_at"),
   approvedBy: text("approved_by"),
   publishedAt: text("published_at"),
+  verificationStatus: text("verification_status").notNull().default("unverified"),
+  verificationUpdatedAt: text("verification_updated_at"),
+  verificationSummary: text("verification_summary"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (table) => ({
   statusCategoryIdx: index("idx_skills_status_category").on(table.status, table.category),
   approvalStatusIdx: index("idx_skills_approval_status").on(table.approvalStatus, table.updatedAt),
+  verificationStatusIdx: index("idx_skills_verification_status").on(table.verificationStatus, table.updatedAt),
   regionIdx: index("idx_skills_region").on(table.region),
   lastSeenIdx: index("idx_skills_last_seen").on(table.lastSeenAt),
 }));
@@ -48,6 +52,25 @@ export const skillReviewEvents = sqliteTable("skill_review_events", {
   createdAt: text("created_at").notNull(),
 }, (table) => ({
   skillIdx: index("idx_skill_review_events_skill").on(table.skillId, table.createdAt),
+}));
+
+export const skillVerificationJobs = sqliteTable("skill_verification_jobs", {
+  id: text("id").primaryKey(),
+  skillId: text("skill_id").notNull(),
+  mode: text("mode").notNull(),
+  status: text("status").notNull(),
+  requestedBy: text("requested_by").notNull(),
+  requestedEmail: text("requested_email"),
+  sourceHash: text("source_hash").notNull(),
+  verifierVersion: text("verifier_version").notNull(),
+  summary: text("summary"),
+  findingsJson: text("findings_json").notNull().default("[]"),
+  externalJobId: text("external_job_id"),
+  createdAt: text("created_at").notNull(),
+  startedAt: text("started_at"),
+  finishedAt: text("finished_at"),
+}, (table) => ({
+  skillStatusIdx: index("idx_skill_verification_jobs_skill_status").on(table.skillId, table.status, table.createdAt),
 }));
 
 export const syncSources = sqliteTable("sync_sources", {

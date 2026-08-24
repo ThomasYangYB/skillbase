@@ -15,3 +15,10 @@ export function getOperator(request: Request): Operator | null {
     email,
   };
 }
+
+export function operatorErrorResponse() {
+  if (!runtimeEnv.SKILLBASE_OPERATOR_USER_ID && !runtimeEnv.SKILLBASE_OPERATOR_EMAIL) {
+    return Response.json({ error: "운영자 계정이 아직 설정되지 않았습니다." }, { status: 503 });
+  }
+  return Response.json({ error: "운영자 권한이 필요합니다." }, { status: 401 });
+}
