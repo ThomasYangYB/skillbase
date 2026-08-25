@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { copyText } from "../../../lib/clipboard";
 
 type SkillDetail = {
   id: string; name: string; category: string; description: string; tags: string[]; compatibility: string[];
@@ -57,9 +58,9 @@ export default function SkillDetailClient({ skillId }: { skillId: string }) {
     void fetch("/api/usage", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ skillId: skill.id, event }) }).catch(() => undefined);
   };
   const prepare = async () => {
-    try { await navigator.clipboard.writeText(prompt); } catch { /* clipboard can be blocked */ }
-    setStatus("프롬프트를 클립보드에 복사했습니다. 외부 앱에 붙여넣기 전 내용을 확인하세요.");
-    track("copy");
+    const copied = await copyText(prompt);
+    setStatus(copied ? "프롬프트를 클립보드에 복사했습니다. 외부 앱에 붙여넣기 전 내용을 확인하세요." : "클립보드 접근이 차단되었습니다. 프롬프트를 직접 선택해 복사하세요.");
+    if (copied) track("copy");
   };
   const applyInput = () => {
     setPrompt(skill.prompt.replace(/\{\{[^}]+\}\}/g, input.trim() || "[여기에 작업 입력값을 넣으세요]"));
@@ -91,7 +92,7 @@ export default function SkillDetailClient({ skillId }: { skillId: string }) {
     const shareData = { title: `${skill.name} · skillbase`, text: skill.summaryKo ?? skill.description, url: window.location.href };
     try {
       if (navigator.share) await navigator.share(shareData);
-      else { await navigator.clipboard.writeText(window.location.href); setStatus("상세 페이지 링크를 복사했습니다."); }
+      else { const copied = await copyText(window.location.href); setStatus(copied ? "상세 페이지 링크를 복사했습니다." : "클립보드 접근이 차단되었습니다. 링크를 직접 선택해 복사하세요."); }
     } catch {
       // A cancelled native share is not an error to surface.
     }
@@ -106,7 +107,7 @@ export default function SkillDetailClient({ skillId }: { skillId: string }) {
         <div className="detail-source"><span>원본 출처</span><a href={skill.sourceUrl} target="_blank" rel="noreferrer">{skill.source} ↗</a></div>
         {workspaces.length > 0 && <section className="detail-workspace"><div><strong>비공개 공간에 저장</strong><span>팀 멤버와 함께 이 Skill을 보관합니다.</span></div><select value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)} aria-label="비공개 공간 선택">{workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select><button onClick={() => void addToWorkspace()} disabled={workspaces.find((workspace) => workspace.id === workspaceId)?.role === "viewer"}>저장</button><Link href="/workspaces">공간 관리 ↗</Link></section>}
         <div className="detail-grid">
-          <section className="detail-card"><div className="detail-card-title"><span>01</span><h2>설치와 호환성</h2></div><p>설치 전에 명령어와 필요한 플랫폼을 확인하세요. 실제 설치는 사용자의 로컬 환경에서 실행됩니다.</p><div className="detail-code"><code>{skill.install}</code><button onClick={() => { void navigator.clipboard?.writeText(skill.install); setStatus("설치 명령어를 복사했습니다."); }}>복사</button></div><div className="detail-chip-row">{skill.compatibility.map((item) => <span key={item}>{item}</span>)}</div></section>
+          <section className="detail-card"><div className="detail-card-title"><span>01</span><h2>설치와 호환성</h2></div><p>설치 전에 명령어와 필요한 플랫폼을 확인하세요. 실제 설치는 사용자의 로컬 환경에서 실행됩니다.</p><div className="detail-code"><code>{skill.install}</code><button onClick={async () => { const copied = await copyText(skill.install); setStatus(copied ? "설치 명령어를 복사했습니다." : "클립보드 접근이 차단되었습니다. 설치 명령어를 직접 선택해 복사하세요."); }}>복사</button></div><div className="detail-chip-row">{skill.compatibility.map((item) => <span key={item}>{item}</span>)}</div></section>
           <section className="detail-card"><div className="detail-card-title"><span>02</span><h2>프롬프트 준비</h2></div><label htmlFor="detail-input">작업 입력값</label><textarea id="detail-input" value={input} onChange={(event) => setInput(event.target.value)} placeholder="이 Skill로 처리할 작업을 입력하세요." /><button className="detail-secondary" onClick={applyInput}>입력값 반영</button><label htmlFor="detail-prompt">실행 전 미리보기</label><textarea id="detail-prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} /><div className="detail-actions"><button className="detail-secondary" onClick={() => void prepare()}>프롬프트 복사</button><button className="detail-primary" onClick={() => void openApp()}>복사 후 앱 열기 ↗</button></div></section>
         </div>
         <section className="verification-panel"><div><strong>검증 정보</strong><span>{verificationLabel(skill.verificationStatus)}</span></div><p>{skill.verificationSummary ?? "검증 상세 요약이 아직 기록되지 않았습니다. 원본과 권한을 직접 확인하세요."}</p><dl><div><dt>원본 링크</dt><dd>{skill.sourceLinkStatus === "ok" ? "정상 응답" : skill.sourceLinkStatus === "broken" ? "확인 필요" : "최근 점검 정보 없음"}</dd></div><div><dt>최근 검증</dt><dd>{skill.verificationUpdatedAt ?? "기록 없음"}</dd></div><div><dt>최근 업데이트</dt><dd>{skill.updatedAt ?? "기록 없음"}</dd></div></dl>{skill.licensePrevious && <p className="detail-warning">라이선스 변경 감지: {skill.licensePrevious} → {skill.license ?? "미상"}</p>}</section>

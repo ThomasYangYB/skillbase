@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { copyText } from "../lib/clipboard";
 
 type Skill = {
   id: string;
@@ -636,20 +637,20 @@ export default function Home() {
   };
 
   const copyPrompt = async () => {
-    if (!selectedSkill) return;
-    try {
-      await navigator.clipboard.writeText(promptDraft || selectedSkill.prompt);
-    } catch {
-      // Clipboard access can be blocked outside a secure context; the UI still confirms the intent.
+    if (!selectedSkill) return false;
+    const copied = await copyText(promptDraft || selectedSkill.prompt);
+    setCopied(copied);
+    setExecutionStatus(copied ? "프롬프트를 클립보드에 복사했습니다. 외부 앱에 붙여넣기 전 내용을 확인하세요." : "클립보드 접근이 차단되었습니다. 프롬프트를 직접 선택해 복사하세요.");
+    if (copied) {
+      void trackUsage(selectedSkill.id, "copy");
+      window.setTimeout(() => setCopied(false), 2200);
     }
-    setCopied(true);
-    void trackUsage(selectedSkill.id, "copy");
-    window.setTimeout(() => setCopied(false), 2200);
+    return copied;
   };
 
   const copyAndOpen = async () => {
     if (!selectedSkill) return;
-    await copyPrompt();
+    if (!await copyPrompt()) return;
     if (!window.confirm("지원 앱을 열까요? 프롬프트는 복사되며 외부 앱에 자동 전송되지는 않습니다.")) return;
     void trackUsage(selectedSkill.id, "open");
     window.open(selectedSkill.appUrl, "_blank", "noopener,noreferrer");
@@ -902,7 +903,7 @@ export default function Home() {
             <p className="modal-source">출처: <a href={selectedSkill.sourceUrl} target="_blank" rel="noreferrer">{selectedSkill.source}</a> ↗</p>
             <p className="modal-detail-link"><a href={`/skills/${selectedSkill.id}`}>검증 정보가 포함된 독립 상세 페이지 열기 ↗</a></p>
             <div className="modal-columns">
-              <div className="modal-block"><div className="block-title"><span>01</span><h3>설치</h3></div><p>원본 출처의 설치 경로입니다. 실제 실행 권한과 파일 변경 내용을 확인한 뒤 설치하세요.</p><div className="code-box"><code>{selectedSkill.install}</code><button onClick={() => navigator.clipboard?.writeText(selectedSkill.install)} aria-label="설치 명령어 복사">복사</button></div><button className="verify-button" onClick={() => { setVerified(true); void trackUsage(selectedSkill.id, "install_verify"); }}>{verified ? "내 환경 확인 표시됨 ✓" : "설치 후 확인 표시"}</button></div>
+              <div className="modal-block"><div className="block-title"><span>01</span><h3>설치</h3></div><p>원본 출처의 설치 경로입니다. 실제 실행 권한과 파일 변경 내용을 확인한 뒤 설치하세요.</p><div className="code-box"><code>{selectedSkill.install}</code><button onClick={async () => { const copied = await copyText(selectedSkill.install); setExecutionStatus(copied ? "설치 명령어를 복사했습니다." : "클립보드 접근이 차단되었습니다. 설치 명령어를 직접 선택해 복사하세요."); }} aria-label="설치 명령어 복사">복사</button></div><button className="verify-button" onClick={() => { setVerified(true); void trackUsage(selectedSkill.id, "install_verify"); }}>{verified ? "내 환경 확인 표시됨 ✓" : "설치 후 확인 표시"}</button></div>
               <div className="modal-block"><div className="block-title"><span>02</span><h3>프롬프트 준비</h3></div><p>입력값을 반영한 뒤 내용을 확인하고, 사용자가 직접 외부 앱으로 가져갑니다.</p><textarea className="prompt-input" value={promptInput} onChange={(event) => setPromptInput(event.target.value)} placeholder="이 Skill로 처리할 작업을 입력하세요." aria-label="프롬프트 입력값" /><button className="verify-button" onClick={applyPromptInput}>입력값 반영</button><div className="prompt-box"><textarea value={promptDraft} onChange={(event) => setPromptDraft(event.target.value)} aria-label="실행할 프롬프트" /></div><div className="prompt-actions"><button className="secondary-button" onClick={copyPrompt}>{copied ? "복사 완료 ✓" : "프롬프트 복사"}</button><button className="primary-button" onClick={copyAndOpen}>복사 후 앱 열기 ↗</button></div></div>
             </div>
             <p className="modal-footnote">브라우저는 외부 앱에 내용을 자동 전송할 수 없으므로, 프롬프트를 복사하고 확인 후 앱을 엽니다. 실제 설치·권한 검증은 로컬 환경에서 확인하세요.</p>
