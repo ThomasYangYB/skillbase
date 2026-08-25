@@ -14,6 +14,7 @@ export type BackupSnapshot = {
   workspaces?: Array<Record<string, unknown>>;
   workspaceMembers?: Array<Record<string, unknown>>;
   workspaceItems?: Array<Record<string, unknown>>;
+  betaAccessRequests?: Array<Record<string, unknown>>;
   sync: Record<string, unknown>;
 };
 
@@ -24,7 +25,7 @@ async function digest(value: string) {
 
 export async function createBackupSnapshot(db: D1Database): Promise<BackupSnapshot> {
   const sync = await getSyncStatus(db);
-  const [skills, reviewEvents, verificationJobs, feedback, alerts, qualityIssues, usageEvents, favorites, submissions, workspaces, workspaceMembers, workspaceItems] = await Promise.all([
+  const [skills, reviewEvents, verificationJobs, feedback, alerts, qualityIssues, usageEvents, favorites, submissions, workspaces, workspaceMembers, workspaceItems, betaAccessRequests] = await Promise.all([
     db.prepare("SELECT * FROM skills ORDER BY updated_at DESC, name ASC").all<Record<string, unknown>>(),
     db.prepare("SELECT * FROM skill_review_events ORDER BY created_at DESC LIMIT 5000").all<Record<string, unknown>>(),
     db.prepare("SELECT * FROM skill_verification_jobs ORDER BY created_at DESC LIMIT 5000").all<Record<string, unknown>>(),
@@ -37,6 +38,7 @@ export async function createBackupSnapshot(db: D1Database): Promise<BackupSnapsh
     db.prepare("SELECT * FROM skill_workspaces ORDER BY updated_at DESC LIMIT 5000").all<Record<string, unknown>>(),
     db.prepare("SELECT * FROM skill_workspace_members ORDER BY created_at DESC LIMIT 10000").all<Record<string, unknown>>(),
     db.prepare("SELECT * FROM skill_workspace_items ORDER BY updated_at DESC LIMIT 20000").all<Record<string, unknown>>(),
+    db.prepare("SELECT * FROM beta_access_requests ORDER BY created_at DESC LIMIT 10000").all<Record<string, unknown>>(),
   ]);
   return {
     exportedAt: new Date().toISOString(),
@@ -52,6 +54,7 @@ export async function createBackupSnapshot(db: D1Database): Promise<BackupSnapsh
     workspaces: workspaces.results ?? [],
     workspaceMembers: workspaceMembers.results ?? [],
     workspaceItems: workspaceItems.results ?? [],
+    betaAccessRequests: betaAccessRequests.results ?? [],
     sync: sync as unknown as Record<string, unknown>,
   };
 }
@@ -74,6 +77,7 @@ export function buildRestorePlan(snapshot: BackupSnapshot, contentHash: string |
     { key: "workspaces", table: "skill_workspaces", order: 10, required: ["id", "name", "owner_id"] },
     { key: "workspaceMembers", table: "skill_workspace_members", order: 11, required: ["id", "workspace_id"] },
     { key: "workspaceItems", table: "skill_workspace_items", order: 12, required: ["id", "workspace_id", "skill_id"] },
+    { key: "betaAccessRequests", table: "beta_access_requests", order: 13, required: ["id", "email", "status"] },
   ] as const;
   const skillIds = new Set(restoreRows(snapshot.skills).map((row) => String(row.id ?? "")).filter(Boolean));
   const relationWarnings = [
@@ -111,11 +115,11 @@ export async function validateBackupSnapshot(snapshot: unknown) {
   }
   if (!("submissions" in value)) warnings.push("이전 백업 포맷이라 사용자 제출 데이터가 없습니다.");
   else if (!Array.isArray(value.submissions)) errors.push("submissions 배열이 아닙니다.");
-  for (const [key, label] of [["workspaces", "비공개 공간"], ["workspaceMembers", "비공개 공간 멤버"], ["workspaceItems", "비공개 공간 Skill"]] as const) {
+  for (const [key, label] of [["workspaces", "비공개 공간"], ["workspaceMembers", "비공개 공간 멤버"], ["workspaceItems", "비공개 공간 Skill"], ["betaAccessRequests", "베타 접근 신청"]] as const) {
     if (!(key in value)) warnings.push(`이전 백업 포맷이라 ${label} 데이터가 없습니다.`);
     else if (!Array.isArray(value[key])) errors.push(`${key} 배열이 아닙니다.`);
   }
-  const arrays: Array<[string, unknown]> = [["skills", value.skills], ["reviewEvents", value.reviewEvents], ["verificationJobs", value.verificationJobs], ["feedback", value.feedback], ["alerts", value.alerts], ["qualityIssues", value.qualityIssues], ["usageEvents", value.usageEvents], ["favorites", value.favorites], ["submissions", value.submissions ?? []], ["workspaces", value.workspaces ?? []], ["workspaceMembers", value.workspaceMembers ?? []], ["workspaceItems", value.workspaceItems ?? []]];
+  const arrays: Array<[string, unknown]> = [["skills", value.skills], ["reviewEvents", value.reviewEvents], ["verificationJobs", value.verificationJobs], ["feedback", value.feedback], ["alerts", value.alerts], ["qualityIssues", value.qualityIssues], ["usageEvents", value.usageEvents], ["favorites", value.favorites], ["submissions", value.submissions ?? []], ["workspaces", value.workspaces ?? []], ["workspaceMembers", value.workspaceMembers ?? []], ["workspaceItems", value.workspaceItems ?? []], ["betaAccessRequests", value.betaAccessRequests ?? []]];
   for (const [name, entries] of arrays) if (!Array.isArray(entries)) errors.push(`${name} 배열이 아닙니다.`);
   const skills = Array.isArray(value.skills) ? value.skills : [];
   const ids = skills.map((row) => typeof row === "object" && row ? String((row as Record<string, unknown>).id ?? "") : "");
@@ -148,6 +152,7 @@ export async function validateBackupSnapshot(snapshot: unknown) {
     workspaces: Array.isArray(value.workspaces) ? value.workspaces as Array<Record<string, unknown>> : [],
     workspaceMembers: Array.isArray(value.workspaceMembers) ? value.workspaceMembers as Array<Record<string, unknown>> : [],
     workspaceItems: Array.isArray(value.workspaceItems) ? value.workspaceItems as Array<Record<string, unknown>> : [],
+    betaAccessRequests: Array.isArray(value.betaAccessRequests) ? value.betaAccessRequests as Array<Record<string, unknown>> : [],
     sync: value.sync && typeof value.sync === "object" ? value.sync as Record<string, unknown> : {},
   } satisfies BackupSnapshot;
   return {
@@ -167,6 +172,7 @@ export async function validateBackupSnapshot(snapshot: unknown) {
       workspaces: Array.isArray(value.workspaces) ? value.workspaces.length : 0,
       workspaceMembers: Array.isArray(value.workspaceMembers) ? value.workspaceMembers.length : 0,
       workspaceItems: Array.isArray(value.workspaceItems) ? value.workspaceItems.length : 0,
+      betaAccessRequests: Array.isArray(value.betaAccessRequests) ? value.betaAccessRequests.length : 0,
     },
     contentHash,
     restorePlan: buildRestorePlan(normalized, contentHash, warnings),

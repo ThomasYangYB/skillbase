@@ -240,13 +240,21 @@ test("keeps durable abuse protection and restore rehearsal configured", async ()
   assert.match(workspaceMigration, /skill_workspace_items/);
   assert.match(detail, /비공개 공간에 저장/);
   assert.match(fixture, /workspaceItems/);
+  assert.match(fixture, /betaAccessRequests/);
   assert.match(workflow, /backup:restore-test/);
 });
 
 test("keeps launch trust pages and production health checks configured", async () => {
-  const [health, manifest, privacy, terms, licenses, healthScript, retention, worker, packageJson, maintenance, page] = await Promise.all([
+  const [health, manifest, betaRoute, adminBeta, betaPage, betaMigration, schema, backup, restore, privacy, terms, licenses, healthScript, retention, worker, packageJson, maintenance, page] = await Promise.all([
     readFile(new URL("../app/api/health/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/v1/manifest/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/beta/request/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/admin/beta/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/beta/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0012_beta_access_requests.sql", import.meta.url), "utf8"),
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/backup.ts", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/restore-rehearsal.mjs", import.meta.url), "utf8"),
     readFile(new URL("../app/privacy/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/terms/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/licenses/page.tsx", import.meta.url), "utf8"),
@@ -260,6 +268,13 @@ test("keeps launch trust pages and production health checks configured", async (
   assert.match(health, /SELECT 1 AS ok/);
   assert.match(health, /pendingReviews/);
   assert.match(manifest, /api\/v1\/skills/);
+  assert.match(betaRoute, /enforceD1RateLimit/);
+  assert.match(adminBeta, /reviewBetaAccessRequest/);
+  assert.match(betaPage, /베타 신청하기/);
+  assert.match(betaMigration, /beta_access_requests/);
+  assert.match(schema, /betaAccessRequests/);
+  assert.match(backup, /betaAccessRequests/);
+  assert.match(restore, /0012_beta_access_requests/);
   assert.match(privacy, /개인정보처리방침/);
   assert.match(terms, /이용약관/);
   assert.match(licenses, /원본·라이선스/);

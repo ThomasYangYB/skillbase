@@ -194,6 +194,22 @@ export const skillSubmissions = sqliteTable("skill_submissions", {
   actorIdx: index("idx_skill_submissions_actor_created").on(table.actorId, table.createdAt),
 }));
 
+export const betaAccessRequests = sqliteTable("beta_access_requests", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull(),
+  note: text("note"),
+  actorId: text("actor_id"),
+  status: text("status").notNull().default("pending"),
+  consentedAt: text("consented_at").notNull(),
+  createdAt: text("created_at").notNull(),
+  reviewedBy: text("reviewed_by"),
+  reviewedAt: text("reviewed_at"),
+  reviewNote: text("review_note"),
+}, (table) => ({
+  statusIdx: index("idx_beta_access_requests_status_created").on(table.status, table.createdAt),
+  emailIdx: index("idx_beta_access_requests_email_created").on(table.email, table.createdAt),
+}));
+
 export const requestRateLimits = sqliteTable("request_rate_limits", {
   key: text("key").notNull(),
   windowStart: integer("window_start").notNull(),

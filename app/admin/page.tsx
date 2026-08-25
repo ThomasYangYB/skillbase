@@ -82,6 +82,8 @@ type SummaryMetrics = {
   failures: Array<{ id: string; name: string; error: string; updatedAt: string }>;
 };
 type SkillSubmission = { id: string; actor_email: string | null; name: string; source_url: string; source_type: string; category: string; description: string; install: string; prompt: string; created_at: string };
+type BetaAccessRequest = { id: string; email: string; note: string | null; status: "pending" | "approved" | "invited" | "rejected"; created_at: string; reviewed_at: string | null; review_note: string | null };
+const betaStatusLabel: Record<BetaAccessRequest["status"], string> = { pending: "검토 필요", approved: "접근 정책 추가 필요", invited: "초대 완료", rejected: "반려됨" };
 type RestorePlan = { ready?: boolean; target?: string; execution?: string; tables?: Array<{ table: string; rows: number }>; warnings?: string[] };
 
 const tabs: Array<{ key: QueueTab; label: string }> = [
@@ -137,6 +139,7 @@ export default function AdminQueuePage() {
   const [metrics, setMetrics] = useState<VerificationMetrics | null>(null);
   const [toolStatus, setToolStatus] = useState("");
   const [submissions, setSubmissions] = useState<SkillSubmission[]>([]);
+  const [betaRequests, setBetaRequests] = useState<BetaAccessRequest[]>([]);
   const backupInputRef = useRef<HTMLInputElement>(null);
 
   const loadQueue = useCallback(async (nextTab: QueueTab) => {
@@ -172,6 +175,16 @@ export default function AdminQueuePage() {
       if (response.ok) setSubmissions(Array.isArray(payload.items) ? payload.items : []);
     } catch {
       // Submission review is optional and should not block the approval queue.
+    }
+  }, []);
+
+  const loadBetaRequests = useCallback(async () => {
+    try {
+      const response = await fetch("/api/admin/beta", { cache: "no-store" });
+      const payload = await response.json() as { requests?: BetaAccessRequest[] };
+      if (response.ok) setBetaRequests(Array.isArray(payload.requests) ? payload.requests : []);
+    } catch {
+      // Beta access review is optional and should not block the catalog queue.
     }
   }, []);
 
@@ -267,14 +280,29 @@ export default function AdminQueuePage() {
     }
   };
 
+  const reviewBeta = async (requestId: string, action: "approve" | "reject" | "mark_invited") => {
+    setBusyId(requestId);
+    try {
+      const response = await fetch("/api/admin/beta", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ requestId, action }) });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "베타 신청을 처리하지 못했습니다.");
+      setNotice(action === "approve" ? "베타 접근 신청을 승인했습니다." : action === "mark_invited" ? "초대 완료로 표시했습니다." : "베타 접근 신청을 반려했습니다.");
+      await loadBetaRequests();
+    } catch (betaError) {
+      setError(betaError instanceof Error ? betaError.message : "베타 신청을 처리하지 못했습니다.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   useEffect(() => {
-    const timer = window.setTimeout(() => { void loadQueue(tab); void loadMetrics(); void loadSubmissions(); }, 0);
-    const poller = window.setInterval(() => { void loadQueue(tab); void loadMetrics(); void loadSubmissions(); }, 10000);
+    const timer = window.setTimeout(() => { void loadQueue(tab); void loadMetrics(); void loadSubmissions(); void loadBetaRequests(); }, 0);
+    const poller = window.setInterval(() => { void loadQueue(tab); void loadMetrics(); void loadSubmissions(); void loadBetaRequests(); }, 10000);
     return () => {
       window.clearTimeout(timer);
       window.clearInterval(poller);
     };
-  }, [loadMetrics, loadQueue, loadSubmissions, tab]);
+  }, [loadBetaRequests, loadMetrics, loadQueue, loadSubmissions, tab]);
 
   const changeStatus = async (skillId: string, action: ReviewAction) => {
     setBusyId(skillId);
@@ -363,6 +391,7 @@ export default function AdminQueuePage() {
         {error && <div className="admin-error"><strong>접근 또는 처리 오류</strong><span>{error}</span></div>}
         {metrics?.alerts && metrics.alerts.length > 0 && <div className="admin-alert-list"><strong>미해결 운영 알림 {metrics.alerts.length}건</strong>{metrics.alerts.map((alert) => <div className="admin-alert" key={alert.id}><span><b>{alert.title}</b> · {alert.message}</span><button onClick={() => void resolveAlert(alert.id)}>확인 처리</button></div>)}</div>}
         {submissions.length > 0 && <div className="admin-submission-list"><div><strong>사용자 제출 검토 {submissions.length}건</strong><span>승인하면 바로 공개하지 않고 검증 큐로 이동합니다.</span></div>{submissions.map((submission) => <article className="admin-submission" key={submission.id}><div><h3>{submission.name}</h3><p>{submission.category} · {submission.source_type} · {submission.actor_email ?? "익명 제출"}</p><p>{submission.description}</p><a href={submission.source_url} target="_blank" rel="noreferrer">원본 보기 ↗</a></div><div className="admin-quality-actions"><button className="action-primary" disabled={busyId === submission.id} onClick={() => void reviewSubmission(submission.id, "approve")}>검증 큐로 이동</button><button className="action-danger" disabled={busyId === submission.id} onClick={() => void reviewSubmission(submission.id, "reject")}>반려</button></div></article>)}</div>}
+        {betaRequests.length > 0 && <div className="admin-beta-list"><div className="admin-beta-heading"><div><strong>베타 접근 신청 {betaRequests.length}건</strong><span>승인 후 Sites 접근 정책에 이메일을 추가하고, 완료되면 초대 완료로 표시하세요.</span></div><a className="admin-export" href="/api/admin/beta/export">승인 이메일 CSV ↓</a></div>{betaRequests.map((request) => <article className="admin-beta-item" key={request.id}><div><strong>{request.email}</strong><span className={`beta-status-pill beta-status-${request.status}`}>{betaStatusLabel[request.status]}</span><p>{request.note ?? "사용 목적을 남기지 않았습니다."}</p><small>신청 {formatDate(request.created_at)}</small></div><div className="admin-quality-actions">{request.status === "pending" && <><button className="action-primary" disabled={busyId === request.id} onClick={() => void reviewBeta(request.id, "approve")}>승인</button><button className="action-danger" disabled={busyId === request.id} onClick={() => void reviewBeta(request.id, "reject")}>반려</button></>}{request.status === "approved" && <button className="action-primary" disabled={busyId === request.id} onClick={() => void reviewBeta(request.id, "mark_invited")}>초대 완료</button>}{request.status === "rejected" && <button className="action-secondary" disabled={busyId === request.id} onClick={() => void reviewBeta(request.id, "approve")}>다시 승인</button>}</div></article>)}</div>}
         {metrics?.quality && metrics.quality.issues.length > 0 && <div className="admin-quality-list">
           <div><strong>품질 검토 필요 {metrics.quality.open}건</strong><span>자동 삭제하지 않습니다. 대표 Skill을 확인한 뒤 중복 공개만 수동 해제하세요.</span></div>
           {metrics.quality.issues.map((issue) => <div className="admin-quality-item" key={issue.id}>

@@ -17,6 +17,7 @@ const migrationNames = [
   "0009_skill_submissions.sql",
   "0010_request_rate_limits.sql",
   "0011_private_workspaces.sql",
+  "0012_beta_access_requests.sql",
 ];
 
 const restoreTables = [
@@ -32,6 +33,7 @@ const restoreTables = [
   ["workspaces", "skill_workspaces"],
   ["workspaceMembers", "skill_workspace_members"],
   ["workspaceItems", "skill_workspace_items"],
+  ["betaAccessRequests", "beta_access_requests"],
 ];
 
 function sqlIdentifier(value) {
