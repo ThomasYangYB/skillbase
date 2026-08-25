@@ -847,7 +847,7 @@ function isVerificationStatus(value: unknown): value is VerificationStatus {
 
 export async function listStoredSkills(db: D1Database, search = "", region = "", category = "", verification = "", sort = "recommended", limit = 120, platform = "") {
   await ensureSchema(db);
-  const clauses = ["status = 'active'", "approval_status = 'published'"];
+  const clauses = ["status = 'active'", "approval_status = 'published'", "duplicate_of IS NULL", "COALESCE(source_link_status, 'unknown') <> 'broken'", "NOT EXISTS (SELECT 1 FROM skill_quality_issues WHERE skill_quality_issues.skill_id = skills.id AND skill_quality_issues.status = 'open' AND skill_quality_issues.severity = 'blocker')"];
   const args: (string | number)[] = [];
   if (search) {
     clauses.push("(name LIKE ? OR description LIKE ? OR summary_ko LIKE ? OR source LIKE ? OR tags_json LIKE ?)");
@@ -878,7 +878,7 @@ export async function listStoredSkills(db: D1Database, search = "", region = "",
 
 export async function getPublishedSkill(db: D1Database, skillId: string) {
   await ensureSchema(db);
-  const row = await db.prepare("SELECT skills.*, COALESCE((SELECT COUNT(*) FROM skill_usage_events WHERE skill_id = skills.id AND event_type IN ('view', 'copy', 'open') AND created_at >= datetime('now', '-30 days')), 0) AS usage_count, COALESCE((SELECT COUNT(*) FROM skill_favorites WHERE skill_id = skills.id), 0) AS favorite_count, COALESCE((SELECT COUNT(*) FROM skill_quality_issues WHERE skill_id = skills.id AND status = 'open'), 0) AS quality_issue_count FROM skills WHERE skills.id = ? AND skills.status = 'active' AND skills.approval_status = 'published'").bind(skillId).first<Record<string, unknown>>();
+  const row = await db.prepare("SELECT skills.*, COALESCE((SELECT COUNT(*) FROM skill_usage_events WHERE skill_id = skills.id AND event_type IN ('view', 'copy', 'open') AND created_at >= datetime('now', '-30 days')), 0) AS usage_count, COALESCE((SELECT COUNT(*) FROM skill_favorites WHERE skill_id = skills.id), 0) AS favorite_count, COALESCE((SELECT COUNT(*) FROM skill_quality_issues WHERE skill_id = skills.id AND status = 'open'), 0) AS quality_issue_count FROM skills WHERE skills.id = ? AND skills.status = 'active' AND skills.approval_status = 'published' AND skills.duplicate_of IS NULL AND COALESCE(skills.source_link_status, 'unknown') <> 'broken' AND NOT EXISTS (SELECT 1 FROM skill_quality_issues WHERE skill_quality_issues.skill_id = skills.id AND skill_quality_issues.status = 'open' AND skill_quality_issues.severity = 'blocker')").bind(skillId).first<Record<string, unknown>>();
   if (!row) return null;
   return {
     ...rowToSkill(row),

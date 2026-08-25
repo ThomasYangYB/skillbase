@@ -335,5 +335,8 @@ test("keeps the automatic Korean summary provider path explicit", async () => {
   assert.match(docs, /OPENAI_API_KEY/);
   assert.match(checklist, /AI 제공자가 연결됨/);
   assert.match(sync, /OPENAI_API_BASE_URL/);
+  assert.match(sync, /duplicate_of IS NULL/);
+  assert.match(sync, /source_link_status/);
+  assert.match(sync, /severity = 'blocker'/);
   assert.match(readFile ? await readFile(new URL("../app/api/admin/summaries/route.ts", import.meta.url), "utf8") : "", /processPendingSkillSummaries/);
 });
