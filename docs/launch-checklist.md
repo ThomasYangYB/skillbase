@@ -7,7 +7,7 @@
 - [ ] 외부 사용자를 초대할 경우 Sites 접근 정책의 허용 사용자와 앱 내부 워크스페이스 멤버를 같은 명단으로 대조합니다.
 - [ ] `/beta` 신청을 운영자 큐에서 승인하고, Sites 접근 정책에 이메일을 추가한 뒤 초대 완료로 표시합니다.
 - [ ] `SKILLBASE_ALERT_WEBHOOK_URL`, `SKILLBASE_SYNC_TOKEN`, `SKILLBASE_SANDBOX_TOKEN`, `OPENAI_API_KEY`(Workers AI를 사용하지 않을 때)를 소스가 아닌 Sites secret으로 설정합니다.
-- [ ] 출시 직전 `SKILLBASE_REQUIRE_SUMMARY_PROVIDER=true npm run health:check`를 통과시켜 AI provider가 실제 운영 환경에서 연결됐는지 확인합니다.
+- [ ] 출시 직전 `npm run health:release`를 통과시켜 AI provider가 실제 운영 환경에서 연결됐는지 확인합니다. 이 명령은 `SKILLBASE_SITE_URL`을 읽고 요약 provider 미연결을 실패로 처리합니다.
 
 ## 품질과 데이터
 

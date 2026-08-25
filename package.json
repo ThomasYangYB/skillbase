@@ -13,7 +13,8 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern work --ignore-pattern outputs --ignore-pattern .vinext --ignore-pattern .wrangler",
     "db:generate": "drizzle-kit generate",
     "backup:restore-test": "node scripts/restore-rehearsal.mjs",
-    "health:check": "node scripts/health-check.mjs"
+    "health:check": "node scripts/health-check.mjs",
+    "health:release": "node scripts/release-check.mjs"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
