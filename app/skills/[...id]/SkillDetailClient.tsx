@@ -6,6 +6,7 @@ import Link from "next/link";
 type SkillDetail = {
   id: string; name: string; category: string; description: string; tags: string[]; compatibility: string[];
   summaryKo?: string | null;
+  summaryStatus?: "pending" | "generated" | "failed";
   risk: "낮음" | "주의"; region: "국내" | "해외"; source: string; sourceUrl: string; sourceType: "공식" | "커뮤니티" | "디렉터리";
   trust: "원본 확인" | "검토 필요"; prompt: string; install: string; appUrl: string; license?: string | null;
   verificationStatus?: string; verificationSummary?: string | null; verificationUpdatedAt?: string | null;
@@ -100,7 +101,7 @@ export default function SkillDetailClient({ skillId }: { skillId: string }) {
     <main className="detail-shell">
       <header className="detail-topbar"><Link prefetch={false} className="brand" href="/" aria-label="skillbase 홈" onClick={(event) => { event.preventDefault(); window.location.assign("/"); }}><span className="brand-mark">s<span>·</span></span><span>skillbase</span></Link><Link className="detail-back" href="/">← 카탈로그</Link></header>
       <article className="detail-page">
-        <div className="detail-heading"><div className="detail-monogram">{skill.name.slice(0, 2).toUpperCase()}</div><div><p className="section-kicker">{skill.category}</p><h1>{skill.name}</h1><p>{skill.description}</p>{skill.summaryKo && <p className="detail-summary"><strong>한국어 요약</strong>{skill.summaryKo}</p>}</div><button className={`favorite-button ${favorite ? "active" : ""}`} onClick={() => void toggleFavorite()} aria-label="즐겨찾기">{favorite ? "★" : "☆"}</button></div>
+        <div className="detail-heading"><div className="detail-monogram">{skill.name.slice(0, 2).toUpperCase()}</div><div><p className="section-kicker">{skill.category}</p><h1>{skill.name}</h1><p>{skill.description}</p><p className={`detail-summary ${skill.summaryKo ? "" : "detail-summary-pending"}`}><strong>한국어 요약</strong>{skill.summaryKo ?? (skill.summaryStatus === "failed" ? "자동 한국어 요약 생성에 실패했습니다. 원본 설명과 검증 정보를 확인하세요." : "자동 한국어 요약 생성 대기 중입니다.")}</p></div><button className={`favorite-button ${favorite ? "active" : ""}`} onClick={() => void toggleFavorite()} aria-label="즐겨찾기">{favorite ? "★" : "☆"}</button></div>
         <div className="detail-badges"><span>{verificationLabel(skill.verificationStatus)}</span><span>권한 위험도 {skill.risk}</span><span>{skill.region} · {skill.sourceType}</span><span>라이선스 {skill.license ?? "미상"}</span></div>
         <div className="detail-source"><span>원본 출처</span><a href={skill.sourceUrl} target="_blank" rel="noreferrer">{skill.source} ↗</a></div>
         {workspaces.length > 0 && <section className="detail-workspace"><div><strong>비공개 공간에 저장</strong><span>팀 멤버와 함께 이 Skill을 보관합니다.</span></div><select value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)} aria-label="비공개 공간 선택">{workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select><button onClick={() => void addToWorkspace()} disabled={workspaces.find((workspace) => workspace.id === workspaceId)?.role === "viewer"}>저장</button><Link href="/workspaces">공간 관리 ↗</Link></section>}

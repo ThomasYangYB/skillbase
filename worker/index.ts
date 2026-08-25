@@ -18,6 +18,9 @@ interface Env {
   SKILLBASE_SANDBOX_TOKEN?: string;
   SKILLBASE_ALERT_WEBHOOK_URL?: string;
   AI?: SummaryAiBinding;
+  OPENAI_API_KEY?: string;
+  OPENAI_MODEL?: string;
+  OPENAI_API_BASE_URL?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {

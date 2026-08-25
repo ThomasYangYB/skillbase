@@ -6,12 +6,13 @@
 - [ ] 공개·베타로 전환하기 전 운영자 계정에 MFA를 켭니다.
 - [ ] 외부 사용자를 초대할 경우 Sites 접근 정책의 허용 사용자와 앱 내부 워크스페이스 멤버를 같은 명단으로 대조합니다.
 - [ ] `/beta` 신청을 운영자 큐에서 승인하고, Sites 접근 정책에 이메일을 추가한 뒤 초대 완료로 표시합니다.
-- [ ] `SKILLBASE_ALERT_WEBHOOK_URL`, `SKILLBASE_SYNC_TOKEN`, `SKILLBASE_SANDBOX_TOKEN`을 소스가 아닌 Sites secret으로 설정합니다.
+- [ ] `SKILLBASE_ALERT_WEBHOOK_URL`, `SKILLBASE_SYNC_TOKEN`, `SKILLBASE_SANDBOX_TOKEN`, `OPENAI_API_KEY`(Workers AI를 사용하지 않을 때)를 소스가 아닌 Sites secret으로 설정합니다.
 
 ## 품질과 데이터
 
 - [ ] 자동 수집을 한 번 실행하고 검토 필요·깨진 링크·중복·라이선스 변경 건을 확인합니다.
 - [ ] AI 요약은 운영자 승인 상태만 공개되는지 확인합니다.
+- [ ] 관리자 지표에서 AI 제공자가 연결됨으로 표시되는지 확인하고, 테스트 Skill 1건의 번역·요약·운영자 승인 흐름을 확인합니다.
 - [ ] 현재 백업을 내려받아 복구 리허설을 실행합니다.
 - [ ] `/api/health`, `/api/v1/manifest`, `/api/v1/skills?limit=1`이 200인지 확인합니다.
 - [ ] 실제 Skill 원본의 라이선스와 설치 명령을 샘플 10건 이상 대조합니다.

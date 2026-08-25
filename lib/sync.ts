@@ -18,6 +18,9 @@ export type SyncEnv = {
   GITHUB_TOKEN?: string;
   SKILLBASE_ALERT_WEBHOOK_URL?: string;
   AI?: SummaryAiBinding;
+  OPENAI_API_KEY?: string;
+  OPENAI_MODEL?: string;
+  OPENAI_API_BASE_URL?: string;
 };
 
 export type CatalogSkill = {
@@ -684,15 +687,31 @@ function parseAiSummaries(text: string, expectedIds: Set<string>) {
   return summaries;
 }
 
-async function generateSummaryBatch(ai: SummaryAiBinding, rows: SummaryRow[]) {
+const SUMMARY_SYSTEM_PROMPT = "너는 AI Skill 카탈로그의 한국어 편집자다. 주어진 설명만 근거로 각 Skill을 한국어 한 문장으로 요약한다. 영어 설명은 한국어로 번역한 뒤 핵심 기능을 요약하고, 이미 한국어인 설명은 자연스럽게 압축한다. 기능을 추측하거나 과장하지 않는다. 반드시 JSON 배열만 출력하고 형식은 [{\"id\":\"원본 id\",\"summaryKo\":\"한국어 한 문장\"}]이다. 각 요약은 8~180자다.";
+
+async function generateSummaryBatch(env: Pick<SyncEnv, "AI" | "OPENAI_API_KEY" | "OPENAI_MODEL" | "OPENAI_API_BASE_URL">, rows: SummaryRow[]) {
   const input = rows.map((row) => ({ id: row.id, name: row.name, category: row.category, tags: parseJsonArray(row.tags_json), description: row.description.slice(0, 1800) }));
-  const result = await ai.run(SUMMARY_MODEL, {
-    messages: [
-      { role: "system", content: "너는 AI Skill 카탈로그의 한국어 편집자다. 주어진 설명만 근거로 각 Skill을 한국어 한 문장으로 요약한다. 영어 설명은 한국어로 번역한 뒤 핵심 기능을 요약하고, 이미 한국어인 설명은 자연스럽게 압축한다. 기능을 추측하거나 과장하지 않는다. 반드시 JSON 배열만 출력하고 형식은 [{\"id\":\"원본 id\",\"summaryKo\":\"한국어 한 문장\"}]이다. 각 요약은 8~180자다." },
-      { role: "user", content: JSON.stringify(input) },
-    ],
+  const messages = [
+    { role: "system" as const, content: SUMMARY_SYSTEM_PROMPT },
+    { role: "user" as const, content: JSON.stringify(input) },
+  ];
+  if (env.AI) {
+    const result = await env.AI.run(SUMMARY_MODEL, { messages });
+    return parseAiSummaries(extractAiText(result), new Set(rows.map((row) => row.id)));
+  }
+  if (!env.OPENAI_API_KEY) throw new Error("AI 요약 제공자가 연결되지 않았습니다.");
+  const baseUrl = (env.OPENAI_API_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${env.OPENAI_API_KEY}`, "content-type": "application/json" },
+    body: JSON.stringify({ model: env.OPENAI_MODEL || "gpt-4o-mini", temperature: 0.2, messages }),
+    signal: AbortSignal.timeout(25_000),
   });
-  return parseAiSummaries(extractAiText(result), new Set(rows.map((row) => row.id)));
+  const payload = await response.json() as { choices?: Array<{ message?: { content?: unknown } }>; error?: { message?: string } };
+  if (!response.ok) throw new Error(`OpenAI 요약 요청 실패: ${payload.error?.message ?? response.statusText}`);
+  const content = payload.choices?.[0]?.message?.content;
+  if (typeof content !== "string") throw new Error("OpenAI 요약 응답이 비어 있습니다.");
+  return parseAiSummaries(content, new Set(rows.map((row) => row.id)));
 }
 
 export async function processPendingSkillSummaries(env: SyncEnv, maxPerRun = SUMMARY_MAX_PER_RUN) {
@@ -701,8 +720,8 @@ export async function processPendingSkillSummaries(env: SyncEnv, maxPerRun = SUM
   const pendingResult = await env.DB.prepare("SELECT id, name, description, category, tags_json, content_hash FROM skills WHERE status = 'active' AND summary_status IN ('pending', 'failed') ORDER BY updated_at ASC LIMIT ?").bind(Math.min(Math.max(maxPerRun, 1), 80)).all<SummaryRow>();
   const pending = pendingResult.results ?? [];
   if (pending.length === 0) return { status: "idle", processed: 0, failed: 0, remaining: 0 };
-  if (!env.AI) {
-    await recordOpsAlerts(env, [{ kind: "quality_issue", severity: "warning", title: "AI 한국어 요약 바인딩 미연결", message: `${pending.length}개 Skill의 한국어 요약이 대기 중입니다. Cloudflare Workers AI 바인딩 AI를 연결하면 다음 수집 주기에 자동 처리됩니다.`, fingerprint: "summary:ai-binding-missing" }]);
+  if (!env.AI && !env.OPENAI_API_KEY) {
+    await recordOpsAlerts(env, [{ kind: "quality_issue", severity: "warning", title: "AI 한국어 요약 제공자 미연결", message: `${pending.length}개 Skill의 한국어 요약이 대기 중입니다. Cloudflare Workers AI 바인딩 AI 또는 Sites secret OPENAI_API_KEY를 연결하면 다음 수집 주기에 자동 처리됩니다.`, fingerprint: "summary:provider-missing" }]);
     return { status: "ai_unavailable", processed: 0, failed: 0, remaining: pending.length };
   }
 
@@ -711,7 +730,7 @@ export async function processPendingSkillSummaries(env: SyncEnv, maxPerRun = SUM
   for (let index = 0; index < pending.length; index += SUMMARY_BATCH_SIZE) {
     const batch = pending.slice(index, index + SUMMARY_BATCH_SIZE);
     try {
-      const summaries = await generateSummaryBatch(env.AI, batch);
+      const summaries = await generateSummaryBatch(env, batch);
       const updatedAt = now();
       await env.DB.batch(batch.map((row) => env.DB!.prepare("UPDATE skills SET summary_ko = ?, summary_status = 'generated', summary_updated_at = ?, summary_error = NULL, summary_review_status = 'pending', summary_reviewed_by = NULL, summary_reviewed_at = NULL WHERE id = ? AND content_hash = ?").bind(summaries.get(row.id), updatedAt, row.id, row.content_hash)));
       processed += batch.length;

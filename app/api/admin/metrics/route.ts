@@ -21,7 +21,7 @@ export async function GET(request: Request) {
       listOpsAlerts(runtimeEnv.DB, "open", 10),
       getSummaryMetrics(runtimeEnv.DB),
     ]);
-    return Response.json({ verification, quality, usage, alerts, summary, sync }, { headers: { "cache-control": "no-store" } });
+    return Response.json({ verification, quality, usage, alerts, summary: { ...summary, aiConfigured: Boolean(runtimeEnv.AI || runtimeEnv.OPENAI_API_KEY) }, sync }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "운영 지표를 불러오지 못했습니다." }, { status: 500 });
   }

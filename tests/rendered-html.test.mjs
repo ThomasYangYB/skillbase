@@ -310,3 +310,30 @@ test("keeps scheduled health monitoring and API discovery configured", async () 
   assert.match(openapi, /listSkills/);
   assert.match(publicApi, /access-control-allow-headers/);
 });
+
+test("keeps the automatic Korean summary provider path explicit", async () => {
+  const [sync, runtimeEnv, worker, metricsRoute, adminPage, detail, page, docs, checklist] = await Promise.all([
+    readFile(new URL("../lib/sync.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/runtime-env.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/admin/metrics/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/admin/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/skills/[...id]/SkillDetailClient.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../docs/operations.md", import.meta.url), "utf8"),
+    readFile(new URL("../docs/launch-checklist.md", import.meta.url), "utf8"),
+  ]);
+  assert.match(sync, /OPENAI_API_KEY/);
+  assert.match(sync, /chat\/completions/);
+  assert.match(sync, /summary:provider-missing/);
+  assert.match(runtimeEnv, /OPENAI_MODEL/);
+  assert.match(worker, /OPENAI_API_BASE_URL/);
+  assert.match(metricsRoute, /aiConfigured/);
+  assert.match(adminPage, /AI 제공자 미연결/);
+  assert.match(detail, /자동 한국어 요약 생성 대기 중입니다/);
+  assert.match(page, /summaryStatus/);
+  assert.match(docs, /OPENAI_API_KEY/);
+  assert.match(checklist, /AI 제공자가 연결됨/);
+  assert.match(sync, /OPENAI_API_BASE_URL/);
+  assert.match(readFile ? await readFile(new URL("../app/api/admin/summaries/route.ts", import.meta.url), "utf8") : "", /processPendingSkillSummaries/);
+});

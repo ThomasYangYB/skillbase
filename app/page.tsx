@@ -10,6 +10,7 @@ type Skill = {
   category: string;
   description: string;
   summaryKo?: string;
+  summaryStatus?: "pending" | "generated" | "failed";
   tags: string[];
   compatibility: string[];
   risk: "낮음" | "주의";
@@ -56,8 +57,9 @@ const summaryRules: Array<[RegExp, string]> = [
   [/marketing|seo|content|writing/i, "콘텐츠 작성과 검색·마케팅 작업을 지원합니다."],
 ];
 
-function getSkillSummary(skill: Pick<Skill, "name" | "description" | "category" | "tags" | "summaryKo">) {
+function getSkillSummary(skill: Pick<Skill, "name" | "description" | "category" | "tags" | "summaryKo" | "summaryStatus">) {
   if (skill.summaryKo?.trim()) return skill.summaryKo.trim();
+  if (skill.summaryStatus) return skill.summaryStatus === "failed" ? "자동 한국어 요약 생성에 실패했습니다." : "자동 한국어 요약 생성 대기 중입니다.";
   if (/[가-힣]/.test(skill.description)) return skill.description.trim();
   const haystack = `${skill.name} ${skill.description} ${skill.tags.join(" ")}`;
   const matched = summaryRules.find(([pattern]) => pattern.test(haystack));

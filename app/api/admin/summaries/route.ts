@@ -1,5 +1,5 @@
 import { getOperator, operatorErrorResponse } from "../../../../lib/operator";
-import { getSummaryMetrics, retrySkillSummaries, reviewSkillSummary } from "../../../../lib/sync";
+import { getSummaryMetrics, processPendingSkillSummaries, retrySkillSummaries, reviewSkillSummary } from "../../../../lib/sync";
 import { runtimeEnv } from "../../../../lib/runtime-env";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +19,9 @@ export async function POST(request: Request) {
     if (body.action === "retry") {
       const ids = Array.isArray(body.skillIds) ? body.skillIds : body.skillId ? [body.skillId] : [];
       return Response.json({ ok: true, retried: await retrySkillSummaries(runtimeEnv.DB, ids) });
+    }
+    if (body.action === "process") {
+      return Response.json({ ok: true, result: await processPendingSkillSummaries(runtimeEnv) });
     }
     if (body.action === "review" && body.skillId && (body.reviewAction === "approve" || body.reviewAction === "needs_revision")) {
       return Response.json({ ok: true, result: await reviewSkillSummary(runtimeEnv.DB, body.skillId, body.reviewAction, actor) });

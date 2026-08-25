@@ -12,6 +12,9 @@ export type RuntimeEnv = {
   SKILLBASE_SANDBOX_TOKEN?: string;
   SKILLBASE_ALERT_WEBHOOK_URL?: string;
   AI?: SummaryAiBinding;
+  OPENAI_API_KEY?: string;
+  OPENAI_MODEL?: string;
+  OPENAI_API_BASE_URL?: string;
 };
 
 export const runtimeEnv = cloudflareEnv as unknown as RuntimeEnv;

@@ -80,6 +80,7 @@ type SummaryMetrics = {
   needsRevision: number;
   oldestPendingAt: string | null;
   failures: Array<{ id: string; name: string; error: string; updatedAt: string }>;
+  aiConfigured?: boolean;
 };
 type SkillSubmission = { id: string; actor_email: string | null; name: string; source_url: string; source_type: string; category: string; description: string; install: string; prompt: string; created_at: string };
 type BetaAccessRequest = { id: string; email: string; note: string | null; status: "pending" | "approved" | "invited" | "rejected"; created_at: string; reviewed_at: string | null; review_note: string | null };
@@ -248,6 +249,20 @@ export default function AdminQueuePage() {
     }
   };
 
+  const processSummaries = async () => {
+    setToolStatus("AI 요약을 생성하는 중...");
+    try {
+      const response = await fetch("/api/admin/summaries", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "process" }) });
+      const payload = await response.json() as { result?: { processed?: number; failed?: number; remaining?: number; status?: string }; error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "AI 요약 생성에 실패했습니다.");
+      setToolStatus(`AI 요약 처리 완료 · 생성 ${payload.result?.processed ?? 0}건 · 실패 ${payload.result?.failed ?? 0}건 · 잔여 ${payload.result?.remaining ?? 0}건`);
+      await loadQueue(tab);
+      await loadMetrics();
+    } catch (summaryError) {
+      setToolStatus(summaryError instanceof Error ? summaryError.message : "AI 요약 생성에 실패했습니다.");
+    }
+  };
+
   const reviewSummary = async (skillId: string, reviewAction: "approve" | "needs_revision") => {
     setBusyId(skillId);
     try {
@@ -351,7 +366,7 @@ export default function AdminQueuePage() {
     <main className="admin-shell">
       <header className="admin-topbar">
         <Link prefetch={false} className="brand" href="/" aria-label="skillbase 홈"><span className="brand-mark">s<span>·</span></span><span>skillbase</span></Link>
-        <div className="admin-header-actions"><button className="admin-tool-button" onClick={() => void runBackupTest()}>복구 테스트</button><button className="admin-tool-button" onClick={() => backupInputRef.current?.click()}>백업 파일 검사</button><input ref={backupInputRef} type="file" accept="application/json,.json" hidden onChange={(event) => void testBackupFile(event)} /><button className="admin-tool-button" onClick={() => void runQualityCheck()}>품질 점검</button>{metrics?.summary?.failed ? <button className="admin-tool-button" onClick={() => void retrySummaries()}>요약 실패 재시도 {metrics.summary.failed}</button> : null}<a className="admin-export" href="/api/admin/export">데이터 백업 ↓</a><Link prefetch={false} className="admin-back" href="/">카탈로그로 돌아가기 ↗</Link></div>
+        <div className="admin-header-actions"><button className="admin-tool-button" onClick={() => void runBackupTest()}>복구 테스트</button><button className="admin-tool-button" onClick={() => backupInputRef.current?.click()}>백업 파일 검사</button><input ref={backupInputRef} type="file" accept="application/json,.json" hidden onChange={(event) => void testBackupFile(event)} /><button className="admin-tool-button" onClick={() => void runQualityCheck()}>품질 점검</button>{metrics?.summary?.aiConfigured && metrics.summary.pending > 0 ? <button className="admin-tool-button" onClick={() => void processSummaries()}>AI 요약 지금 실행 {metrics.summary.pending}</button> : null}{metrics?.summary?.failed ? <button className="admin-tool-button" onClick={() => void retrySummaries()}>요약 실패 재시도 {metrics.summary.failed}</button> : null}<a className="admin-export" href="/api/admin/export">데이터 백업 ↓</a><Link prefetch={false} className="admin-back" href="/">카탈로그로 돌아가기 ↗</Link></div>
       </header>
 
       <section className="admin-hero">
@@ -373,6 +388,7 @@ export default function AdminQueuePage() {
           {metrics.quality && <span>품질 이슈 {metrics.quality.open}건 · 차단 {metrics.quality.blockers}건</span>}
           {metrics.usage && <span>최근 사용 이벤트 {metrics.usage.totalEvents}건 · 즐겨찾기 {metrics.usage.favorites}건</span>}
           {metrics.summary && <span>AI 요약 생성 {metrics.summary.generated}건 · 대기 {metrics.summary.pending}건 · 실패 {metrics.summary.failed}건 · 검토 {metrics.summary.reviewPending}건</span>}
+          {metrics.summary && !metrics.summary.aiConfigured && <span className="admin-metric-warning">AI 제공자 미연결 · Workers AI 또는 OPENAI_API_KEY 설정 필요</span>}
         </div>}
         {metrics?.usage?.topSkills?.length ? <div className="admin-top-skills" aria-label="최근 사용량 상위 Skill"><strong>최근 사용량 상위</strong>{metrics.usage.topSkills.slice(0, 5).map((skill) => <span key={String(skill.id)}>{String(skill.name)} · {Number(skill.count ?? 0)}회</span>)}</div> : null}
       </section>
