@@ -311,7 +311,9 @@ test("keeps scheduled health monitoring and API discovery configured", async () 
   assert.match(worker, /monitorOperationalHealth/);
   assert.match(health, /completed_with_errors/);
   assert.match(manifest, /api\/v1\/openapi\.json/);
+  assert.match(manifest, /force-dynamic/);
   assert.match(openapi, /openapi: "3\.1\.0"/);
+  assert.match(openapi, /force-dynamic/);
   assert.match(openapi, /listSkills/);
   assert.match(publicApi, /access-control-allow-headers/);
   assert.match(publicApi, /sourceType/);
