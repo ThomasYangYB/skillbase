@@ -12,7 +12,8 @@ export async function GET(request: Request) {
       health: `${origin}/api/health`,
       openapi: `${origin}/api/v1/openapi.json`,
     },
-    filters: ["q", "category", "region", "platform", "verification", "sort", "limit"],
+    filters: ["q", "category", "region", "platform", "sourceType", "verification", "sort", "limit"],
+    detailEndpoint: `${origin}/api/v1/skills/detail?id={skillId}`,
     rateLimit: { requests: 120, window: "1h", header: "X-RateLimit-Remaining" },
     license: `${origin}/licenses`,
   }, { headers: { "cache-control": "public, max-age=300, s-maxage=300" } });

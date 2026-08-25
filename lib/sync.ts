@@ -845,7 +845,7 @@ function isVerificationStatus(value: unknown): value is VerificationStatus {
   return value === "unverified" || value === "legacy" || value === "static_passed" || value === "static_warning" || value === "static_blocked" || value === "sandbox_passed" || value === "sandbox_fallback_passed" || value === "sandbox_failed" || value === "sandbox_unavailable";
 }
 
-export async function listStoredSkills(db: D1Database, search = "", region = "", category = "", verification = "", sort = "recommended", limit = 120, platform = "") {
+export async function listStoredSkills(db: D1Database, search = "", region = "", category = "", verification = "", sort = "recommended", limit = 120, platform = "", sourceType = "") {
   await ensureSchema(db);
   const clauses = ["status = 'active'", "approval_status = 'published'", "duplicate_of IS NULL", "COALESCE(source_link_status, 'unknown') <> 'broken'", "NOT EXISTS (SELECT 1 FROM skill_quality_issues WHERE skill_quality_issues.skill_id = skills.id AND skill_quality_issues.status = 'open' AND skill_quality_issues.severity = 'blocker')"];
   const args: (string | number)[] = [];
@@ -865,6 +865,10 @@ export async function listStoredSkills(db: D1Database, search = "", region = "",
   if (platform) {
     clauses.push("compatibility_json LIKE ?");
     args.push(`%"${platform}"%`);
+  }
+  if (["공식", "커뮤니티", "디렉터리"].includes(sourceType)) {
+    clauses.push("source_type = ?");
+    args.push(sourceType);
   }
   if (["sandbox_passed", "sandbox_fallback_passed", "static_passed", "unverified", "static_warning", "static_blocked", "sandbox_failed", "sandbox_unavailable"].includes(verification)) {
     clauses.push("verification_status = ?");

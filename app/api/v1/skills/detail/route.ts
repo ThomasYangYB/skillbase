@@ -1,12 +1,8 @@
-import { listStoredSkills } from "../../../../lib/sync";
-import { runtimeEnv } from "../../../../lib/runtime-env";
-import { enforceD1RateLimit, rateLimitHeaders, requestNetworkIdentity } from "../../../../lib/rate-limit";
+import { getPublishedSkill } from "../../../../../lib/sync";
+import { runtimeEnv } from "../../../../../lib/runtime-env";
+import { enforceD1RateLimit, rateLimitHeaders, requestNetworkIdentity } from "../../../../../lib/rate-limit";
 
 export const dynamic = "force-dynamic";
-
-function clean(value: string | null, max = 80) {
-  return (value ?? "").trim().slice(0, max);
-}
 
 function headers() {
   return {
@@ -14,6 +10,20 @@ function headers() {
     "cache-control": "public, max-age=60, stale-while-revalidate=300",
     "content-type": "application/json; charset=utf-8",
   };
+}
+
+function decodeSkillId(value: string) {
+  let decoded = value;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const next = decodeURIComponent(decoded);
+      if (next === decoded) break;
+      decoded = next;
+    } catch {
+      break;
+    }
+  }
+  return decoded.trim();
 }
 
 export function OPTIONS() {
@@ -30,18 +40,10 @@ export async function GET(request: Request) {
   }
   const limitHeaders = rateLimitHeaders(rateLimit);
   if (!rateLimit.allowed) return Response.json({ error: "공개 API는 한 시간에 120회까지 호출할 수 있습니다.", resetAt: rateLimit.resetAt }, { status: 429, headers: { ...headers(), ...limitHeaders } });
-  const url = new URL(request.url);
-  const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 50) || 50, 1), 100);
-  const skills = await listStoredSkills(
-    runtimeEnv.DB,
-    clean(url.searchParams.get("q")),
-    clean(url.searchParams.get("region"), 10),
-    clean(url.searchParams.get("category")),
-    clean(url.searchParams.get("verification"), 40),
-    clean(url.searchParams.get("sort"), 20) || "recommended",
-    limit,
-    clean(url.searchParams.get("platform"), 40),
-    clean(url.searchParams.get("sourceType") ?? url.searchParams.get("source"), 20),
-  );
-  return Response.json({ data: skills, meta: { count: skills.length, limit, generatedAt: new Date().toISOString() } }, { headers: { ...headers(), ...limitHeaders } });
+  const rawId = new URL(request.url).searchParams.get("id")?.trim() ?? "";
+  const id = rawId ? decodeSkillId(rawId) : "";
+  if (!id || id.length > 500) return Response.json({ error: "유효한 Skill ID가 필요합니다." }, { status: 400, headers: { ...headers(), ...limitHeaders } });
+  const skill = await getPublishedSkill(runtimeEnv.DB, id);
+  if (!skill) return Response.json({ error: "공개된 Skill을 찾을 수 없습니다." }, { status: 404, headers: { ...headers(), ...limitHeaders } });
+  return Response.json({ data: skill, meta: { generatedAt: new Date().toISOString() } }, { headers: { ...headers(), ...limitHeaders } });
 }

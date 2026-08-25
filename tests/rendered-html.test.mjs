@@ -292,7 +292,7 @@ test("keeps launch trust pages and production health checks configured", async (
 });
 
 test("keeps scheduled health monitoring and API discovery configured", async () => {
-  const [observability, alerts, worker, health, manifest, openapi, publicApi] = await Promise.all([
+  const [observability, alerts, worker, health, manifest, openapi, publicApi, publicDetail] = await Promise.all([
     readFile(new URL("../lib/observability.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/alerts.ts", import.meta.url), "utf8"),
     readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
@@ -300,6 +300,7 @@ test("keeps scheduled health monitoring and API discovery configured", async () 
     readFile(new URL("../app/api/v1/manifest/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/v1/openapi.json/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/v1/skills/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/v1/skills/detail/route.ts", import.meta.url), "utf8"),
   ]);
   assert.match(observability, /monitorOperationalHealth/);
   assert.match(observability, /completed_with_errors/);
@@ -313,6 +314,9 @@ test("keeps scheduled health monitoring and API discovery configured", async () 
   assert.match(openapi, /openapi: "3\.1\.0"/);
   assert.match(openapi, /listSkills/);
   assert.match(publicApi, /access-control-allow-headers/);
+  assert.match(publicApi, /sourceType/);
+  assert.match(publicDetail, /getPublishedSkill/);
+  assert.match(publicDetail, /enforceD1RateLimit/);
   assert.match(readFile ? await readFile(new URL("../lib/sync.ts", import.meta.url), "utf8") : "", /sort === "latest"/);
   assert.match(readFile ? await readFile(new URL("../lib/sync.ts", import.meta.url), "utf8") : "", /sort === "popular"/);
   assert.match(openapi, /"verified"/);

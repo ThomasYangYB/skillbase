@@ -20,6 +20,7 @@ export async function GET(request: Request) {
             { name: "category", in: "query", schema: { type: "string" } },
             { name: "region", in: "query", schema: { type: "string", enum: ["국내", "해외"] } },
             { name: "platform", in: "query", schema: { type: "string" } },
+            { name: "sourceType", in: "query", schema: { type: "string", enum: ["공식", "커뮤니티", "디렉터리"] } },
             { name: "verification", in: "query", schema: { type: "string" } },
             { name: "sort", in: "query", schema: { type: "string", enum: ["recommended", "latest", "popular", "verified", "name"] } },
             { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 50 } },
@@ -28,6 +29,18 @@ export async function GET(request: Request) {
             "200": { description: "공개 승인된 Skill 목록", content: { "application/json": { schema: { $ref: "#/components/schemas/SkillListResponse" } } } },
             "429": { description: "시간당 호출 한도 초과" },
             "503": { description: "D1 데이터베이스 미설정 또는 일시 오류" },
+          },
+        },
+      },
+      "/api/v1/skills/detail": {
+        get: {
+          summary: "공개 Skill 상세 조회",
+          operationId: "getSkillDetail",
+          parameters: [{ name: "id", in: "query", required: true, schema: { type: "string" } }],
+          responses: {
+            "200": { description: "공개 승인되고 품질 게이트를 통과한 Skill 상세" },
+            "404": { description: "공개된 Skill을 찾을 수 없음" },
+            "429": { description: "시간당 호출 한도 초과" },
           },
         },
       },
