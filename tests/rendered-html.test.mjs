@@ -268,6 +268,7 @@ test("keeps launch trust pages and production health checks configured", async (
   assert.match(health, /SELECT 1 AS ok/);
   assert.match(health, /pendingReviews/);
   assert.match(health, /summary_provider_unconfigured/);
+  assert.match(health, /summaryProvider/);
   assert.match(health, /quality_blockers_open/);
   assert.match(manifest, /api\/v1\/skills/);
   assert.match(betaRoute, /enforceD1RateLimit/);
@@ -337,11 +338,13 @@ test("keeps the automatic Korean summary provider path explicit", async () => {
     readFile(new URL("../docs/launch-checklist.md", import.meta.url), "utf8"),
   ]);
   assert.match(sync, /OPENAI_API_KEY/);
+  assert.match(sync, /SummaryProviderStatus/);
   assert.match(sync, /chat\/completions/);
   assert.match(sync, /summary:provider-missing/);
   assert.match(runtimeEnv, /OPENAI_MODEL/);
   assert.match(worker, /OPENAI_API_BASE_URL/);
   assert.match(metricsRoute, /aiConfigured/);
+  assert.match(metricsRoute, /getSummaryProviderStatus/);
   assert.match(adminPage, /AI 제공자 미연결/);
   assert.match(detail, /자동 한국어 요약 생성 대기 중입니다/);
   assert.match(page, /summaryStatus/);

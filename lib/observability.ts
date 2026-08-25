@@ -1,5 +1,5 @@
 import { recordOpsAlerts, type AlertEnv } from "./alerts";
-import { getSummaryMetrics, getSyncStatus } from "./sync";
+import { getSummaryMetrics, getSummaryProviderStatus, getSyncStatus } from "./sync";
 
 type ObservabilityEnv = AlertEnv & { AI?: unknown; OPENAI_API_KEY?: string };
 
@@ -21,14 +21,14 @@ export type OperationalHealth = {
  */
 export async function monitorOperationalHealth(env: ObservabilityEnv): Promise<OperationalHealth> {
   const checkedAt = new Date().toISOString();
-  if (!env.DB) return { status: "unconfigured", staleSkills: 0, summaryPending: 0, summaryFailures: 0, summaryProviderConfigured: Boolean(env.AI || env.OPENAI_API_KEY), latestSync: "unconfigured", alertsCreated: 0, checkedAt };
+  if (!env.DB) return { status: "unconfigured", staleSkills: 0, summaryPending: 0, summaryFailures: 0, summaryProviderConfigured: getSummaryProviderStatus(env).configured, latestSync: "unconfigured", alertsCreated: 0, checkedAt };
 
   const [sync, summaries] = await Promise.all([getSyncStatus(env.DB), getSummaryMetrics(env.DB)]);
   const latestSync = String(sync.latestRun?.status ?? "unknown");
   const staleSkills = sync.staleSkills;
   const summaryPending = summaries.pending;
   const summaryFailures = summaries.failed;
-  const summaryProviderConfigured = Boolean(env.AI || env.OPENAI_API_KEY);
+  const summaryProviderConfigured = getSummaryProviderStatus(env).configured;
   const alerts = [];
 
   if (latestSync === "failed" || latestSync === "completed_with_errors") {

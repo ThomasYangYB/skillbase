@@ -13,7 +13,7 @@ AI 한국어 요약은 `생성 → 운영자 검토 → 승인` 상태로 관리
 
 수집·검증 실패는 `ops_alerts`에 자동 기록됩니다. 운영자 화면에서 미해결 알림을 확인 처리할 수 있고, `SKILLBASE_ALERT_WEBHOOK_URL`을 Sites secret으로 설정하면 같은 알림을 외부 Webhook에도 전송합니다. 동일 원인의 알림은 6시간 동안 묶어 중복 전송을 막습니다.
 
-`/api/health`는 데이터베이스·최근 수집 상태와 함께 `warnings`, 요약 생성 대기·실패 수, AI provider 연결 여부, 품질 차단 이슈 수를 반환합니다. AI 요약 provider 미연결은 카탈로그 자체를 중단시키지 않지만 `summary_provider_unconfigured` 경고로 표시되며, 수집 실패는 HTTP 503 degraded 상태로 표시됩니다.
+`/api/health`는 데이터베이스·최근 수집 상태와 함께 `warnings`, 요약 생성 대기·실패 수, AI provider 연결 여부(`summaries.provider`, `summaries.model`), 품질 차단 이슈 수를 반환합니다. AI 요약 provider 미연결은 카탈로그 자체를 중단시키지 않지만 `summary_provider_unconfigured` 경고로 표시되며, 수집 실패는 HTTP 503 degraded 상태로 표시됩니다.
 
 ## 공개 기준
 

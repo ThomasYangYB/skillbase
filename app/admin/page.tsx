@@ -81,6 +81,8 @@ type SummaryMetrics = {
   oldestPendingAt: string | null;
   failures: Array<{ id: string; name: string; error: string; updatedAt: string }>;
   aiConfigured?: boolean;
+  provider?: "workers_ai" | "openai_compatible" | "missing";
+  model?: string | null;
 };
 type SkillSubmission = { id: string; actor_email: string | null; name: string; source_url: string; source_type: string; category: string; description: string; install: string; prompt: string; created_at: string };
 type BetaAccessRequest = { id: string; email: string; note: string | null; status: "pending" | "approved" | "invited" | "rejected"; created_at: string; reviewed_at: string | null; review_note: string | null };
@@ -388,7 +390,8 @@ export default function AdminQueuePage() {
           {metrics.quality && <span>품질 이슈 {metrics.quality.open}건 · 차단 {metrics.quality.blockers}건</span>}
           {metrics.usage && <span>최근 사용 이벤트 {metrics.usage.totalEvents}건 · 즐겨찾기 {metrics.usage.favorites}건</span>}
           {metrics.summary && <span>AI 요약 생성 {metrics.summary.generated}건 · 대기 {metrics.summary.pending}건 · 실패 {metrics.summary.failed}건 · 검토 {metrics.summary.reviewPending}건</span>}
-          {metrics.summary && !metrics.summary.aiConfigured && <span className="admin-metric-warning">AI 제공자 미연결 · Workers AI 또는 OPENAI_API_KEY 설정 필요</span>}
+          {metrics.summary && <span>요약 제공자: {metrics.summary.provider === "workers_ai" ? "Workers AI" : metrics.summary.provider === "openai_compatible" ? `OpenAI 호환 · ${metrics.summary.model ?? "기본 모델"}` : "미연결"}</span>}
+          {metrics.summary && !metrics.summary.aiConfigured && <span className="admin-metric-warning">AI 제공자 미연결 · Sites에 Workers AI 바인딩 또는 OPENAI_API_KEY 설정 필요</span>}
         </div>}
         {metrics?.usage?.topSkills?.length ? <div className="admin-top-skills" aria-label="최근 사용량 상위 Skill"><strong>최근 사용량 상위</strong>{metrics.usage.topSkills.slice(0, 5).map((skill) => <span key={String(skill.id)}>{String(skill.name)} · {Number(skill.count ?? 0)}회</span>)}</div> : null}
       </section>

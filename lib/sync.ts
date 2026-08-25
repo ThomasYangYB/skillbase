@@ -656,6 +656,28 @@ const SUMMARY_MODEL = "@cf/meta/llama-3.2-3b-instruct";
 const SUMMARY_BATCH_SIZE = 8;
 const SUMMARY_MAX_PER_RUN = 32;
 
+export type SummaryProviderKind = "workers_ai" | "openai_compatible" | "missing";
+
+export type SummaryProviderStatus = {
+  configured: boolean;
+  provider: SummaryProviderKind;
+  model: string | null;
+  baseUrl: string | null;
+};
+
+export function getSummaryProviderStatus(env: { AI?: unknown; OPENAI_API_KEY?: string; OPENAI_MODEL?: string; OPENAI_API_BASE_URL?: string }): SummaryProviderStatus {
+  if (env.AI) return { configured: true, provider: "workers_ai", model: SUMMARY_MODEL, baseUrl: null };
+  if (env.OPENAI_API_KEY) {
+    return {
+      configured: true,
+      provider: "openai_compatible",
+      model: env.OPENAI_MODEL || "gpt-4o-mini",
+      baseUrl: (env.OPENAI_API_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, ""),
+    };
+  }
+  return { configured: false, provider: "missing", model: null, baseUrl: null };
+}
+
 type SummaryRow = { id: string; name: string; description: string; category: string; tags_json: string; content_hash: string };
 
 function extractAiText(result: unknown) {
@@ -700,7 +722,7 @@ async function generateSummaryBatch(env: Pick<SyncEnv, "AI" | "OPENAI_API_KEY" |
     return parseAiSummaries(extractAiText(result), new Set(rows.map((row) => row.id)));
   }
   if (!env.OPENAI_API_KEY) throw new Error("AI 요약 제공자가 연결되지 않았습니다.");
-  const baseUrl = (env.OPENAI_API_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "");
+  const baseUrl = getSummaryProviderStatus(env).baseUrl!;
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: { authorization: `Bearer ${env.OPENAI_API_KEY}`, "content-type": "application/json" },
@@ -720,7 +742,7 @@ export async function processPendingSkillSummaries(env: SyncEnv, maxPerRun = SUM
   const pendingResult = await env.DB.prepare("SELECT id, name, description, category, tags_json, content_hash FROM skills WHERE status = 'active' AND summary_status IN ('pending', 'failed') ORDER BY updated_at ASC LIMIT ?").bind(Math.min(Math.max(maxPerRun, 1), 80)).all<SummaryRow>();
   const pending = pendingResult.results ?? [];
   if (pending.length === 0) return { status: "idle", processed: 0, failed: 0, remaining: 0 };
-  if (!env.AI && !env.OPENAI_API_KEY) {
+  if (!getSummaryProviderStatus(env).configured) {
     await recordOpsAlerts(env, [{ kind: "quality_issue", severity: "warning", title: "AI 한국어 요약 제공자 미연결", message: `${pending.length}개 Skill의 한국어 요약이 대기 중입니다. Cloudflare Workers AI 바인딩 AI 또는 Sites secret OPENAI_API_KEY를 연결하면 다음 수집 주기에 자동 처리됩니다.`, fingerprint: "summary:provider-missing" }]);
     return { status: "ai_unavailable", processed: 0, failed: 0, remaining: pending.length };
   }

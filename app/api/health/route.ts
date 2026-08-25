@@ -1,4 +1,4 @@
-import { getSummaryMetrics, getSyncStatus } from "../../../lib/sync";
+import { getSummaryMetrics, getSummaryProviderStatus, getSyncStatus } from "../../../lib/sync";
 import { getQualitySummary } from "../../../lib/quality";
 import { runtimeEnv } from "../../../lib/runtime-env";
 
@@ -14,12 +14,13 @@ export async function GET() {
     const [sync, summaries, quality] = await Promise.all([getSyncStatus(runtimeEnv.DB), getSummaryMetrics(runtimeEnv.DB), getQualitySummary(runtimeEnv.DB)]);
     const latestStatus = String(sync.latestRun?.status ?? "unknown");
     const status = latestStatus === "failed" || latestStatus === "completed_with_errors" ? "degraded" : "ok";
+    const summaryProvider = getSummaryProviderStatus(runtimeEnv);
     const warnings = [
-      ...(!runtimeEnv.AI && !runtimeEnv.OPENAI_API_KEY && summaries.pending > 0 ? ["summary_provider_unconfigured"] : []),
+      ...(!summaryProvider.configured && summaries.pending > 0 ? ["summary_provider_unconfigured"] : []),
       ...(summaries.failed > 0 ? ["summary_generation_failed"] : []),
       ...(quality.blockers > 0 ? ["quality_blockers_open"] : []),
     ];
-    return Response.json({ status, database: "ok", warnings, sync: { latestStatus, lastFinishedAt: sync.latestRun?.finished_at ?? null, activeSkills: sync.activeSkills, pendingReviews: sync.pendingReviews, staleSkills: sync.staleSkills }, summaries: { generated: summaries.generated, pending: summaries.pending, failed: summaries.failed, reviewPending: summaries.reviewPending, aiConfigured: Boolean(runtimeEnv.AI || runtimeEnv.OPENAI_API_KEY) }, quality: { open: quality.open, blockers: quality.blockers }, checkedAt }, { status: status === "ok" ? 200 : 503, headers: { "cache-control": "no-store" } });
+    return Response.json({ status, database: "ok", warnings, sync: { latestStatus, lastFinishedAt: sync.latestRun?.finished_at ?? null, activeSkills: sync.activeSkills, pendingReviews: sync.pendingReviews, staleSkills: sync.staleSkills }, summaries: { generated: summaries.generated, pending: summaries.pending, failed: summaries.failed, reviewPending: summaries.reviewPending, aiConfigured: summaryProvider.configured, provider: summaryProvider.provider, model: summaryProvider.model }, quality: { open: quality.open, blockers: quality.blockers }, checkedAt }, { status: status === "ok" ? 200 : 503, headers: { "cache-control": "no-store" } });
   } catch {
     return Response.json({ status: "degraded", database: "error", checkedAt }, { status: 503, headers: { "cache-control": "no-store" } });
   }
