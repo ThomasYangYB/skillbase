@@ -1,14 +1,14 @@
-# vinext-starter
+# skillbase
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+검증된 AI Skills를 출처·설치 경로·검증 정보와 함께 탐색하는 카탈로그입니다.
+GitHub, skills.sh, 국내 디렉터리에서 Agent Skills 표준 `SKILL.md`를 주기적으로
+수집하고, 운영자 검토를 거친 항목만 공개합니다.
 
 ## Prerequisites
 
 - Node.js `>=22.13.0`
 
-## Quick Start
+## 개발 시작
 
 ```bash
 npm install
@@ -16,16 +16,26 @@ npm run dev
 npm run build
 ```
 
-This starter does not use `wrangler.jsonc`.
+로컬 환경 변수 이름은 `.env.example`을 참고하세요. 운영 환경의 secret은
+Sites runtime settings에서 관리합니다.
 
-## Included Shape
+출시 전 검사는 다음 명령을 사용합니다.
+
+```bash
+npm run health:release
+```
+
+1인 운영 절차와 중단 기준은 [`docs/one-person-runbook.md`](docs/one-person-runbook.md)에
+정리되어 있습니다.
+
+## 주요 구성
 
 - edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
+- `.openai/hosting.json` declares Sites D1 and R2 bindings
 - `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+- `db/schema.ts` contains catalog, approval, verification, quality, usage, backup, and workspace tables
+- `worker/index.ts` runs scheduled collection, summary generation, health monitoring, and retention
+- `sandbox-adapter/` verifies installation in an isolated Worker
 
 ## Workspace Auth Headers
 
