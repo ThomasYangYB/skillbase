@@ -309,6 +309,9 @@ test("keeps scheduled health monitoring and API discovery configured", async () 
   assert.match(openapi, /openapi: "3\.1\.0"/);
   assert.match(openapi, /listSkills/);
   assert.match(publicApi, /access-control-allow-headers/);
+  assert.match(readFile ? await readFile(new URL("../lib/sync.ts", import.meta.url), "utf8") : "", /sort === "latest"/);
+  assert.match(readFile ? await readFile(new URL("../lib/sync.ts", import.meta.url), "utf8") : "", /sort === "popular"/);
+  assert.match(openapi, /"verified"/);
 });
 
 test("keeps the automatic Korean summary provider path explicit", async () => {

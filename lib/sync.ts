@@ -870,7 +870,15 @@ export async function listStoredSkills(db: D1Database, search = "", region = "",
     clauses.push("verification_status = ?");
     args.push(verification);
   }
-  const order = sort === "name" ? "name ASC" : sort === "verified" ? "CASE WHEN verification_status = 'sandbox_passed' THEN 0 WHEN verification_status = 'static_passed' THEN 1 WHEN verification_status = 'sandbox_fallback_passed' THEN 2 ELSE 3 END, updated_at DESC" : "(favorite_count * 3 + usage_count) DESC, CASE WHEN verification_status = 'sandbox_passed' THEN 0 WHEN verification_status = 'static_passed' THEN 1 WHEN verification_status = 'sandbox_fallback_passed' THEN 2 ELSE 3 END, updated_at DESC, name ASC";
+  const order = sort === "name"
+    ? "name ASC"
+    : sort === "latest"
+      ? "updated_at DESC, name ASC"
+      : sort === "popular"
+        ? "(favorite_count * 3 + usage_count) DESC, updated_at DESC, name ASC"
+        : sort === "verified"
+          ? "CASE WHEN verification_status = 'sandbox_passed' THEN 0 WHEN verification_status = 'static_passed' THEN 1 WHEN verification_status = 'sandbox_fallback_passed' THEN 2 ELSE 3 END, updated_at DESC, name ASC"
+          : "(favorite_count * 3 + usage_count) DESC, CASE WHEN verification_status = 'sandbox_passed' THEN 0 WHEN verification_status = 'static_passed' THEN 1 WHEN verification_status = 'sandbox_fallback_passed' THEN 2 ELSE 3 END, updated_at DESC, name ASC";
   const statement = db.prepare(`SELECT skills.*, COALESCE((SELECT COUNT(*) FROM skill_usage_events WHERE skill_id = skills.id AND event_type IN ('view', 'copy', 'open') AND created_at >= datetime('now', '-30 days')), 0) AS usage_count, COALESCE((SELECT COUNT(*) FROM skill_favorites WHERE skill_id = skills.id), 0) AS favorite_count, COALESCE((SELECT COUNT(*) FROM skill_quality_issues WHERE skill_id = skills.id AND status = 'open'), 0) AS quality_issue_count FROM skills WHERE ${clauses.join(" AND ")} ORDER BY ${order} LIMIT ?`).bind(...args, Math.min(Math.max(limit, 1), 200));
   const result = await statement.all<Record<string, unknown>>();
   return result.results.map(rowToSkill);

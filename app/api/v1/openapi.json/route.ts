@@ -21,7 +21,7 @@ export async function GET(request: Request) {
             { name: "region", in: "query", schema: { type: "string", enum: ["국내", "해외"] } },
             { name: "platform", in: "query", schema: { type: "string" } },
             { name: "verification", in: "query", schema: { type: "string" } },
-            { name: "sort", in: "query", schema: { type: "string", enum: ["recommended", "latest", "popular", "name"] } },
+            { name: "sort", in: "query", schema: { type: "string", enum: ["recommended", "latest", "popular", "verified", "name"] } },
             { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 50 } },
           ],
           responses: {
