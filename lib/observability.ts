@@ -1,12 +1,14 @@
 import { recordOpsAlerts, type AlertEnv } from "./alerts";
 import { getSummaryMetrics, getSyncStatus } from "./sync";
 
-type ObservabilityEnv = AlertEnv;
+type ObservabilityEnv = AlertEnv & { AI?: unknown; OPENAI_API_KEY?: string };
 
 export type OperationalHealth = {
   status: "ok" | "warning" | "critical" | "unconfigured";
   staleSkills: number;
+  summaryPending: number;
   summaryFailures: number;
+  summaryProviderConfigured: boolean;
   latestSync: string;
   alertsCreated: number;
   checkedAt: string;
@@ -19,12 +21,14 @@ export type OperationalHealth = {
  */
 export async function monitorOperationalHealth(env: ObservabilityEnv): Promise<OperationalHealth> {
   const checkedAt = new Date().toISOString();
-  if (!env.DB) return { status: "unconfigured", staleSkills: 0, summaryFailures: 0, latestSync: "unconfigured", alertsCreated: 0, checkedAt };
+  if (!env.DB) return { status: "unconfigured", staleSkills: 0, summaryPending: 0, summaryFailures: 0, summaryProviderConfigured: Boolean(env.AI || env.OPENAI_API_KEY), latestSync: "unconfigured", alertsCreated: 0, checkedAt };
 
   const [sync, summaries] = await Promise.all([getSyncStatus(env.DB), getSummaryMetrics(env.DB)]);
   const latestSync = String(sync.latestRun?.status ?? "unknown");
   const staleSkills = sync.staleSkills;
+  const summaryPending = summaries.pending;
   const summaryFailures = summaries.failed;
+  const summaryProviderConfigured = Boolean(env.AI || env.OPENAI_API_KEY);
   const alerts = [];
 
   if (latestSync === "failed" || latestSync === "completed_with_errors") {
@@ -54,8 +58,17 @@ export async function monitorOperationalHealth(env: ObservabilityEnv): Promise<O
       fingerprint: `health:summary-failed:${summaryFailures}`,
     });
   }
+  if (!summaryProviderConfigured && summaryPending > 0) {
+    alerts.push({
+      kind: "operational_health" as const,
+      severity: "warning" as const,
+      title: "AI 한국어 요약 제공자 미연결",
+      message: `${summaryPending}개의 Skill 요약이 대기 중입니다. Workers AI 바인딩 또는 OPENAI_API_KEY를 연결하세요.`,
+      fingerprint: "health:summary-provider-missing",
+    });
+  }
 
   const alertsCreated = await recordOpsAlerts(env, alerts);
   const status = latestSync === "failed" || latestSync === "completed_with_errors" ? "critical" : alerts.length > 0 ? "warning" : "ok";
-  return { status, staleSkills, summaryFailures, latestSync, alertsCreated, checkedAt };
+  return { status, staleSkills, summaryPending, summaryFailures, summaryProviderConfigured, latestSync, alertsCreated, checkedAt };
 }

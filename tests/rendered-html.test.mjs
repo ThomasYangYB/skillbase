@@ -267,6 +267,8 @@ test("keeps launch trust pages and production health checks configured", async (
   ]);
   assert.match(health, /SELECT 1 AS ok/);
   assert.match(health, /pendingReviews/);
+  assert.match(health, /summary_provider_unconfigured/);
+  assert.match(health, /quality_blockers_open/);
   assert.match(manifest, /api\/v1\/skills/);
   assert.match(betaRoute, /enforceD1RateLimit/);
   assert.match(adminBeta, /reviewBetaAccessRequest/);
@@ -302,6 +304,8 @@ test("keeps scheduled health monitoring and API discovery configured", async () 
   assert.match(observability, /monitorOperationalHealth/);
   assert.match(observability, /completed_with_errors/);
   assert.match(observability, /summaryFailures/);
+  assert.match(observability, /summaryPending/);
+  assert.match(observability, /summary-provider-missing/);
   assert.match(alerts, /operational_health/);
   assert.match(worker, /monitorOperationalHealth/);
   assert.match(health, /completed_with_errors/);
