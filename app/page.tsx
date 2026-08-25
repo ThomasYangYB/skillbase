@@ -452,20 +452,30 @@ function expandSearchQuery(query: string) {
   return aliases ? [...new Set([normalized, ...aliases[1]])] : [normalized];
 }
 
+function initialQueryParam(key: string) {
+  if (typeof window === "undefined") return "";
+  return new URLSearchParams(window.location.search).get(key)?.trim() ?? "";
+}
+
+function initialFilterParam<T extends string>(key: string, fallback: T, allowed: readonly T[]): T {
+  const value = initialQueryParam(key) as T;
+  return allowed.includes(value) ? value : fallback;
+}
+
 function CheckIcon() {
   return <span className="check-icon" aria-hidden="true">✓</span>;
 }
 
 export default function Home() {
   const [catalogSkills, setCatalogSkills] = useState<Skill[]>(skills);
-  const [activeCategory, setActiveCategory] = useState("전체");
-  const [activeRegion, setActiveRegion] = useState<"전체" | "국내" | "해외">("전체");
-  const [activeVerification, setActiveVerification] = useState<VerificationFilter>("전체");
-  const [activeSourceType, setActiveSourceType] = useState<SourceTypeFilter>("전체");
-  const [activePlatform, setActivePlatform] = useState("전체");
-  const [collectionMode, setCollectionMode] = useState<CollectionMode>("전체");
-  const [sortMode, setSortMode] = useState<SortMode>("추천순");
-  const [query, setQuery] = useState("");
+  const [activeCategory, setActiveCategory] = useState(() => initialFilterParam("category", "전체", categoryNames));
+  const [activeRegion, setActiveRegion] = useState<"전체" | "국내" | "해외">(() => initialFilterParam("region", "전체", ["전체", "국내", "해외"] as const));
+  const [activeVerification, setActiveVerification] = useState<VerificationFilter>(() => initialFilterParam("verification", "전체", verificationFilters));
+  const [activeSourceType, setActiveSourceType] = useState<SourceTypeFilter>(() => initialFilterParam("source", "전체", ["전체", "공식", "커뮤니티", "디렉터리"] as const));
+  const [activePlatform, setActivePlatform] = useState(() => initialQueryParam("platform") || "전체");
+  const [collectionMode, setCollectionMode] = useState<CollectionMode>(() => initialFilterParam("collection", "전체", ["전체", "즐겨찾기", "최근 본"] as const));
+  const [sortMode, setSortMode] = useState<SortMode>(() => initialFilterParam("sort", "추천순", ["추천순", "최신순", "이름순"] as const));
+  const [query, setQuery] = useState(() => initialQueryParam("q"));
   const searchRef = useRef<HTMLInputElement>(null);
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [compareIds, setCompareIds] = useState<string[]>([]);
@@ -533,10 +543,27 @@ export default function Home() {
     void loadSyncSummary();
     void loadFavorites();
     void loadPersonalUsage();
-    const onShortcut = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); searchRef.current?.focus(); } };
+    const onShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); searchRef.current?.focus(); }
+      if (event.key === "Escape") { setSelectedSkill(null); setCompareOpen(false); setSubmitOpen(false); }
+    };
     window.addEventListener("keydown", onShortcut);
     return () => { cancelled = true; window.removeEventListener("keydown", onShortcut); };
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (query) params.set("q", query);
+    if (activeCategory !== "전체") params.set("category", activeCategory);
+    if (activeRegion !== "전체") params.set("region", activeRegion);
+    if (activeVerification !== "전체") params.set("verification", activeVerification);
+    if (activeSourceType !== "전체") params.set("source", activeSourceType);
+    if (activePlatform !== "전체") params.set("platform", activePlatform);
+    if (collectionMode !== "전체") params.set("collection", collectionMode);
+    if (sortMode !== "추천순") params.set("sort", sortMode);
+    const search = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`);
+  }, [activeCategory, activePlatform, activeRegion, activeSourceType, activeVerification, collectionMode, query, sortMode]);
 
   const categories = categoryNames.map((label) => ({
     label,
@@ -854,7 +881,7 @@ export default function Home() {
         <button className="submit-coming-soon" onClick={() => { setSubmitOpen(true); setSubmissionStatus(""); }}>Skill 제출하기</button>
       </section>
 
-      <footer className="footer"><Link className="brand" href="/" aria-label="skillbase 홈"><span className="brand-mark">s<span>·</span></span><span>skillbase</span></Link><span>AI Skills를 더 안전하고 쉽게.</span><span>© 2026 skillbase</span></footer>
+      <footer className="footer"><Link className="brand" href="/" aria-label="skillbase 홈"><span className="brand-mark">s<span>·</span></span><span>skillbase</span></Link><span>AI Skills를 더 안전하고 쉽게.</span><Link href="/privacy">개인정보</Link><Link href="/terms">이용약관</Link><Link href="/licenses">라이선스</Link><a href="/api/v1/manifest">API</a><span>© 2026 skillbase</span></footer>
 
       {compareOpen && <div className="modal-backdrop" role="presentation"><section className="skill-modal compare-modal" role="dialog" aria-modal="true" aria-labelledby="compare-title"><button className="modal-close" onClick={() => setCompareOpen(false)} aria-label="비교 창 닫기">×</button><p className="section-kicker">SKILL COMPARISON</p><h2 id="compare-title">선택한 Skill 비교</h2><div className="compare-table-wrap"><table className="compare-table"><thead><tr><th>항목</th>{compareIds.map((id) => { const item = catalogSkills.find((skill) => skill.id === id); return <th key={id}>{item?.name}</th>; })}</tr></thead><tbody><tr><th>카테고리</th>{compareIds.map((id) => <td key={id}>{catalogSkills.find((skill) => skill.id === id)?.category}</td>)}</tr><tr><th>한국어 요약</th>{compareIds.map((id) => <td key={id}>{getSkillSummary(catalogSkills.find((skill) => skill.id === id) ?? skills[0])}</td>)}</tr><tr><th>호환 플랫폼</th>{compareIds.map((id) => <td key={id}>{catalogSkills.find((skill) => skill.id === id)?.compatibility.join(" · ")}</td>)}</tr><tr><th>권한 위험도</th>{compareIds.map((id) => <td key={id}>{catalogSkills.find((skill) => skill.id === id)?.risk}</td>)}</tr><tr><th>검증 상태</th>{compareIds.map((id) => <td key={id}>{catalogSkills.find((skill) => skill.id === id)?.verificationStatus ?? "기존 원본 확인"}</td>)}</tr><tr><th>설치 명령어</th>{compareIds.map((id) => <td key={id}><code>{catalogSkills.find((skill) => skill.id === id)?.install}</code></td>)}</tr></tbody></table></div><button className="secondary-button" onClick={() => setCompareOpen(false)}>닫기</button></section></div>}
 

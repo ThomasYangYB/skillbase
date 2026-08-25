@@ -346,6 +346,7 @@ export default function AdminQueuePage() {
           {metrics.usage && <span>최근 사용 이벤트 {metrics.usage.totalEvents}건 · 즐겨찾기 {metrics.usage.favorites}건</span>}
           {metrics.summary && <span>AI 요약 생성 {metrics.summary.generated}건 · 대기 {metrics.summary.pending}건 · 실패 {metrics.summary.failed}건 · 검토 {metrics.summary.reviewPending}건</span>}
         </div>}
+        {metrics?.usage?.topSkills?.length ? <div className="admin-top-skills" aria-label="최근 사용량 상위 Skill"><strong>최근 사용량 상위</strong>{metrics.usage.topSkills.slice(0, 5).map((skill) => <span key={String(skill.id)}>{String(skill.name)} · {Number(skill.count ?? 0)}회</span>)}</div> : null}
       </section>
 
       <section className="admin-content">

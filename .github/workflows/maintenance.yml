@@ -62,3 +62,26 @@ jobs:
             gh issue create --title "$title" --body "The weekly maintenance check found a newer \\`skills\\` CLI. Review the release, update sandbox-adapter/Dockerfile, run the adapter tests, and deploy the Worker after approval."
           fi
           echo "Pinned Skills CLI $current differs from published $latest"
+
+  production-health:
+    name: Check production health
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+      - name: Install site dependencies
+        run: npm ci
+      - name: Run production health checks when configured
+        env:
+          SKILLBASE_SITE_URL: ${{ secrets.SKILLBASE_SITE_URL }}
+          SKILLBASE_SITE_BEARER_TOKEN: ${{ secrets.SKILLBASE_SITE_BEARER_TOKEN }}
+        run: |
+          if [ -z "$SKILLBASE_SITE_URL" ]; then
+            echo "SKILLBASE_SITE_URL secret is not configured; health check skipped."
+            exit 0
+          fi
+          npm run health:check

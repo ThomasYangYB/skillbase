@@ -242,3 +242,34 @@ test("keeps durable abuse protection and restore rehearsal configured", async ()
   assert.match(fixture, /workspaceItems/);
   assert.match(workflow, /backup:restore-test/);
 });
+
+test("keeps launch trust pages and production health checks configured", async () => {
+  const [health, manifest, privacy, terms, licenses, healthScript, retention, worker, packageJson, maintenance, page] = await Promise.all([
+    readFile(new URL("../app/api/health/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/v1/manifest/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/privacy/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/terms/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/licenses/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/health-check.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../lib/retention.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../.github/workflows/maintenance.yml", import.meta.url), "utf8"),
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.match(health, /SELECT 1 AS ok/);
+  assert.match(health, /pendingReviews/);
+  assert.match(manifest, /api\/v1\/skills/);
+  assert.match(privacy, /개인정보처리방침/);
+  assert.match(terms, /이용약관/);
+  assert.match(licenses, /원본·라이선스/);
+  assert.match(healthScript, /SKILLBASE_SITE_URL/);
+  assert.match(retention, /180/);
+  assert.match(worker, /pruneUsageEvents/);
+  assert.match(packageJson, /health:check/);
+  assert.match(maintenance, /production-health/);
+  assert.match(page, /href="\/privacy"/);
+  assert.match(page, /href="\/licenses"/);
+  assert.match(page, /initialQueryParam/);
+  assert.match(page, /history\.replaceState/);
+});
