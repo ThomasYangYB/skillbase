@@ -30,6 +30,11 @@ const expectedOrigin = new URL(baseUrl).origin;
 const manifest = payloads.get("/api/v1/manifest");
 const openapi = payloads.get("/api/v1/openapi.json");
 const health = payloads.get("/api/health");
+const summaryProvider = health?.summaries?.provider ?? "unknown";
+if (process.env.SKILLBASE_REQUIRE_SUMMARY_PROVIDER === "true" && !["workers_ai", "openai_compatible"].includes(summaryProvider)) {
+  console.error(JSON.stringify({ ok: false, results, failed: "summary-provider", provider: summaryProvider }));
+  process.exit(1);
+}
 const originValues = [manifest?.baseUrl, manifest?.detailEndpoint, openapi?.servers?.[0]?.url];
 const originChecks = originValues
   .filter((value) => typeof value === "string")
@@ -56,6 +61,6 @@ console.log(JSON.stringify({
   results,
   originContract: "ok",
   detailContract: data[0]?.id ? "ok" : "skipped_empty_catalog",
-  summaryProvider: health?.summaries?.provider ?? "unknown",
+  summaryProvider,
   summaryWarning: Array.isArray(health?.warnings) && health.warnings.includes("summary_provider_unconfigured"),
 }));

@@ -284,6 +284,7 @@ test("keeps launch trust pages and production health checks configured", async (
   assert.match(healthScript, /SKILLBASE_SITE_URL/);
   assert.match(healthScript, /origin-contract/);
   assert.match(healthScript, /detail-contract/);
+  assert.match(healthScript, /SKILLBASE_REQUIRE_SUMMARY_PROVIDER/);
   assert.match(retention, /180/);
   assert.match(worker, /pruneUsageEvents/);
   assert.match(packageJson, /health:check/);

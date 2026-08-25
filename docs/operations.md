@@ -59,6 +59,7 @@ AI 한국어 요약은 `생성 → 운영자 검토 → 승인` 상태로 관리
 - 변경 후 CI가 성공했는지 확인하고, Sites에도 같은 커밋을 반영합니다.
 - 운영 runtime secret은 소스에 저장하지 않습니다.
 - 공개 전 상태 점검은 `/api/health`, 외부 연동자는 `/api/v1/manifest`를 기준으로 확인합니다. GitHub Actions의 `production-health` 작업은 Site URL과 필요한 bearer secret이 설정된 경우에만 실행됩니다.
+- 출시 직전에는 `SKILLBASE_REQUIRE_SUMMARY_PROVIDER=true npm run health:check`를 실행해 AI provider 미연결 상태를 실패로 승격합니다. 주간 유지보수에서는 이 변수를 설정하지 않아 provider 미연결을 경고로만 기록합니다.
 
 ## 출시 체크리스트
 
