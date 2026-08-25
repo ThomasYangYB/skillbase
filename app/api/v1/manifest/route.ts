@@ -10,6 +10,7 @@ export async function GET(request: Request) {
     endpoints: {
       skills: `${origin}/api/v1/skills`,
       health: `${origin}/api/health`,
+      openapi: `${origin}/api/v1/openapi.json`,
     },
     filters: ["q", "category", "region", "platform", "verification", "sort", "limit"],
     rateLimit: { requests: 120, window: "1h", header: "X-RateLimit-Remaining" },

@@ -288,3 +288,25 @@ test("keeps launch trust pages and production health checks configured", async (
   assert.match(page, /initialQueryParam/);
   assert.match(page, /history\.replaceState/);
 });
+
+test("keeps scheduled health monitoring and API discovery configured", async () => {
+  const [observability, alerts, worker, health, manifest, openapi, publicApi] = await Promise.all([
+    readFile(new URL("../lib/observability.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/alerts.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/health/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/v1/manifest/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/v1/openapi.json/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/v1/skills/route.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(observability, /monitorOperationalHealth/);
+  assert.match(observability, /completed_with_errors/);
+  assert.match(observability, /summaryFailures/);
+  assert.match(alerts, /operational_health/);
+  assert.match(worker, /monitorOperationalHealth/);
+  assert.match(health, /completed_with_errors/);
+  assert.match(manifest, /api\/v1\/openapi\.json/);
+  assert.match(openapi, /openapi: "3\.1\.0"/);
+  assert.match(openapi, /listSkills/);
+  assert.match(publicApi, /access-control-allow-headers/);
+});

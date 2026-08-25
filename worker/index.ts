@@ -4,6 +4,7 @@ import handler from "vinext/server/app-router-entry";
 import { recordOpsAlerts } from "../lib/alerts";
 import { processPendingSkillSummaries, syncAllSources, type SummaryAiBinding } from "../lib/sync";
 import { pruneUsageEvents } from "../lib/retention";
+import { monitorOperationalHealth } from "../lib/observability";
 
 interface Env {
   ASSETS: Fetcher;
@@ -74,9 +75,11 @@ const worker = {
       await syncAllSources(env);
       await processPendingSkillSummaries(env);
       if (env.DB) await pruneUsageEvents(env.DB);
+      await monitorOperationalHealth(env);
     })().catch(async (error) => {
       console.error(`Scheduled skill sync failed for ${controller.cron}`, error);
       await recordOpsAlerts(env, [{ kind: "sync_failure", severity: "critical", title: "예약 수집 작업 중단", message: error instanceof Error ? error.message : "예약 수집 작업이 중단되었습니다.", fingerprint: "sync:scheduled-exception" }]);
+      try { await monitorOperationalHealth(env); } catch (healthError) { console.error("Operational health check failed", healthError); }
     }));
   },
 };

@@ -1,5 +1,5 @@
 export type OpsAlertInput = {
-  kind: "sync_failure" | "verification_failure" | "quality_issue" | "backup_failure" | "security";
+  kind: "sync_failure" | "verification_failure" | "quality_issue" | "backup_failure" | "security" | "operational_health";
   severity: "warning" | "critical";
   title: string;
   message: string;
