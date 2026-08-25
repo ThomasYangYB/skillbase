@@ -282,6 +282,8 @@ test("keeps launch trust pages and production health checks configured", async (
   assert.match(terms, /이용약관/);
   assert.match(licenses, /원본·라이선스/);
   assert.match(healthScript, /SKILLBASE_SITE_URL/);
+  assert.match(healthScript, /origin-contract/);
+  assert.match(healthScript, /detail-contract/);
   assert.match(retention, /180/);
   assert.match(worker, /pruneUsageEvents/);
   assert.match(packageJson, /health:check/);
