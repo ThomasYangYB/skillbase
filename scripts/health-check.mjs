@@ -35,6 +35,14 @@ if (process.env.SKILLBASE_REQUIRE_SUMMARY_PROVIDER === "true" && !["workers_ai",
   console.error(JSON.stringify({ ok: false, results, failed: "summary-provider", provider: summaryProvider }));
   process.exit(1);
 }
+if (process.env.SKILLBASE_REQUIRE_SUMMARY_PROVIDER === "true") {
+  const pending = Number(health?.summaries?.pending ?? 0);
+  const failed = Number(health?.summaries?.failed ?? 0);
+  if (pending > 0 || failed > 0) {
+    console.error(JSON.stringify({ ok: false, results, failed: "summary-queue", provider: summaryProvider, pending, summaryFailed: failed }));
+    process.exit(1);
+  }
+}
 const originValues = [manifest?.baseUrl, manifest?.detailEndpoint, openapi?.servers?.[0]?.url];
 const originChecks = originValues
   .filter((value) => typeof value === "string")
